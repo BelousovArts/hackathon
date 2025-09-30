@@ -1,0 +1,1849 @@
+# -*- coding: utf-8 -*-
+import sys
+import os
+import numpy as np
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+import pyvista as pv
+import pyvistaqt as pvqt
+import open3d as o3d
+from MainWindow import Ui_MainWindow
+
+
+class PCDViewer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        
+        # Настройка UI
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        
+        # Инициализация PyVista
+        self.setup_pyvista_widget()
+        
+        # Настройка treeWidget
+        self.setup_tree_widget()
+        
+        # Подключение сигналов
+        self.ui.pushButton_import.clicked.connect(self.import_pcd)
+        self.ui.pushButton_analys_net.clicked.connect(self.on_click_analyze_net)
+        self.ui.pushButton_remove.clicked.connect(self.on_click_remove_by_class)
+        self.ui.pushButton_export.clicked.connect(self.on_click_export)
+        self.ui.treeWidget.itemChanged.connect(self.on_tree_item_changed)
+        self.ui.treeWidget.currentItemChanged.connect(self.on_tree_current_item_changed)
+        
+        # Размер точек (spinbox)
+        self.ui.spinBox_point_size.setRange(1, 20)
+        self.ui.spinBox_point_size.setValue(3)
+        self.ui.spinBox_point_size.valueChanged.connect(self.on_point_size_changed)
+        
+        # Переключение Eye Dome Lighting (EDL)
+        self.ui.comboBox_eye_dome.currentIndexChanged.connect(self.on_eye_dome_changed)
+        self.ui.comboBox_eye_dome.setCurrentIndex(0)
+
+        # Переключение режима проекции (ортографический/перспективный)
+        self.ui.comboBox_display_mode.currentIndexChanged.connect(self.on_display_mode_changed)
+        self.ui.comboBox_display_mode.setCurrentIndex(0)
+
+        # Смена цвета фона
+        self.background_palette = [
+            ("Белый", 'white'),
+            ("Светло-серый", (200, 200, 200)),
+            ("Серый", (150, 150, 150)),
+            ("Тёмно-серый", (80, 80, 80)),
+            ("Угольный", (30, 30, 30)),
+            ("Сланцевый серый", 'slategray'),
+            ("Тёмный сланцевый", 'darkslategray'),
+            ("Ночной синий", 'midnightblue'),
+            ("Тёмно-синий", 'navy'),
+            ("Стальной синий", 'steelblue'),
+        ]
+        self.ui.comboBox_background_color.blockSignals(True)
+        self.ui.comboBox_background_color.clear()
+        self.ui.comboBox_background_color.addItems([name for name, _ in self.background_palette])
+        self.ui.comboBox_background_color.blockSignals(False)
+        self.ui.comboBox_background_color.setCurrentIndex(0)
+        self.ui.comboBox_background_color.currentIndexChanged.connect(self.on_background_color_changed)
+
+        # Переключение цвета точек
+        self.ui.comboBox_point_color.currentIndexChanged.connect(self.on_point_color_changed)
+
+        # Кнопка преобразования классов выделенных точек
+        if hasattr(self.ui, 'pushButton_transform'):
+            self.ui.pushButton_transform.clicked.connect(self.on_click_transform)
+
+        # Кнопки масштабирования и сброса вида
+        self.ui.pushButton_zoom_up.clicked.connect(self.on_zoom_up)
+        self.ui.pushButton_zoom_down.clicked.connect(self.on_zoom_down)
+        self.ui.pushButton_reset_view.clicked.connect(self.on_reset_view)
+
+        # Кнопки стандартных видов
+        self.ui.pushButton_front.clicked.connect(self.on_view_front)
+        self.ui.pushButton_back.clicked.connect(self.on_view_back)
+        self.ui.pushButton_left.clicked.connect(self.on_view_left)
+        self.ui.pushButton_right.clicked.connect(self.on_view_right)
+        self.ui.pushButton_top.clicked.connect(self.on_view_top)
+        self.ui.pushButton_bottom.clicked.connect(self.on_view_bottom)
+
+        # Режим покликового выделения точек
+        self.selection_mode = False
+        if hasattr(self.ui, 'pushButton_point'):
+            self.ui.pushButton_point.setCheckable(True)
+            self.ui.pushButton_point.clicked.connect(self.on_toggle_point_select)
+        
+        # Режим выделения кистью
+        self.brush_mode = False
+        self.brush_radius = 1.0  # радиус кисти в единицах сцены
+        self.brush_size = 1      # размер кисти 1..20 (шаг 1); 1 => радиус 1.0
+        if hasattr(self.ui, 'pushButton_brush'):
+            self.ui.pushButton_brush.setCheckable(True)
+            self.ui.pushButton_brush.clicked.connect(self.on_toggle_brush_select)
+        # Синхронизация радиуса с размером кисти (size -> radius)
+        self._sync_brush_radius()
+        # Кнопки изменения размера кисти
+        if hasattr(self.ui, 'pushButton_brush_1'):
+            self.ui.pushButton_brush_1.clicked.connect(self.on_brush_size_inc)
+        if hasattr(self.ui, 'pushButton_brush_2'):
+            self.ui.pushButton_brush_2.clicked.connect(self.on_brush_size_dec)
+
+        # Сопоставление индексов комбобокса режимам окраски и обратно
+        self.mode_by_index = {
+            0: 'height',        # Градиент по высоте
+            1: 'rgb',           # RGB
+            2: 'intensity',     # Интенсивность
+            3: 'label',         # Label
+            4: 'predict',       # Predict
+            5: 'white',         # Белый
+            6: 'black',         # Черный
+            7: 'blue',          # Синий
+            8: 'gray',          # Серый
+        }
+        self.index_by_mode = {v: k for k, v in self.mode_by_index.items()}
+        
+        # Настройка контекстного меню для treeWidget
+        self.ui.treeWidget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ui.treeWidget.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # Хранение данных об облаках
+        self.point_clouds = {}
+        # Поля для ML-инференса
+        self._ml_pipeline = None
+        self._ml_pipelines = {}
+        # Определяем базовую директорию (где находится скрипт)
+        self._base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self._ml_ckpt_path = os.path.join(self._base_dir, "models", "randlanet_hack2c.pth")
+        # Карта конфигов по именам (нормализованным)
+        self._ml_cfg_map = {
+            'randlanet': os.path.join(self._base_dir, "configs", "randlanet_hack2c.yml"),
+            'randlanet_toronto3d': os.path.join(self._base_dir, "configs", "randlanet_toronto3d.yml"),
+            'randlanet_semantickitti': os.path.join(self._base_dir, "configs", "randlanet_semantickitti.yml"),
+        }
+        # Карта чекпоинтов по конфигам
+        self._ml_ckpt_map = {
+            'randlanet': os.path.join(self._base_dir, "models", "randlanet_hack2c.pth"),
+            'randlanet_toronto3d': os.path.join(self._base_dir, "models", "randlanet_toronto3d.pth"),
+            'randlanet_semantickitti': os.path.join(self._base_dir, "models", "randlanet_semantickitti.pth"),
+        }
+        
+        # Инициализация статусбара
+        self.update_status_bar()
+        
+        # Устанавливаем фокус на главное окно для обработки клавиш
+        self.setFocusPolicy(Qt.StrongFocus)
+        
+    def _get_selected_cfg_name(self):
+        """Вернуть нормализованное имя конфига по comboBox_analys_net."""
+        try:
+            text = self.ui.comboBox_analys_net.currentText()
+        except Exception:
+            text = ''
+        name = str(text).strip().lower()
+        if 'toronto' in name:
+            return 'randlanet_toronto3d'
+        if 'kitti' in name or 'semantik' in name or 'semantic' in name:
+            return 'randlanet_semantickitti'
+        if name.startswith('randla-net') or name.startswith('randlanet'):
+            return 'randlanet'
+        return 'randlanet'
+
+    def _ensure_ml_pipeline(self):
+        """Ленивая инициализация пайплайна по выбранному конфигу из comboBox."""
+        cfg_name = self._get_selected_cfg_name()
+        if cfg_name in self._ml_pipelines:
+            self._ml_pipeline = self._ml_pipelines[cfg_name]
+            return
+        # Подготовим импорты/конфиг
+        # Финальная инициализация (без нестандартных оберток)
+        from open3d.ml.utils import Config
+        from open3d.ml.torch.models import RandLANet
+        from open3d.ml.torch.pipelines import SemanticSegmentation
+        import tempfile
+        cfg_path = self._ml_cfg_map.get(cfg_name)
+        if not cfg_path:
+            raise RuntimeError(f"Неизвестный конфиг: {cfg_name}")
+        cfg = Config.load_from_file(cfg_path)
+
+        # Переопределяем параметры pipeline для inference-режима (без создания логов)
+        pipeline_cfg = dict(cfg.pipeline)
+        # Используем временную директорию для логов, чтобы не создавать папки в проекте
+        pipeline_cfg['main_log_dir'] = tempfile.gettempdir()
+        pipeline_cfg['save_ckpt_freq'] = -1  # Отключаем сохранение чекпоинтов
+        
+        # Создаём модель и пайплайн без датасета (desktop: только веса и конфиг модели)
+        model = RandLANet(**cfg.model)
+        pipeline = SemanticSegmentation(model, dataset=None, **pipeline_cfg)
+        # Загрузка чекпойнта
+        try:
+            ckpt_path = self._ml_ckpt_map.get(cfg_name, self._ml_ckpt_path)
+            pipeline.load_ckpt(ckpt_path)
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось загрузить чекпойнт:\n{str(e)}')
+            raise
+        self._ml_pipeline = pipeline
+        self._ml_pipelines[cfg_name] = pipeline
+
+    def _run_inference_on_points(self, points_xyz):
+        """Выполнить инференс на numpy массиве Nx3, вернуть массив меток int32."""
+        import numpy as np
+        import open3d as o3d
+        points = np.asarray(points_xyz, dtype=np.float32)
+        labels_dummy = np.zeros(points.shape[0], dtype=np.int32)
+        # Добавим нулевые RGB фичи, если модель ожидает >3 входных каналов (например Toronto3D: 6)
+        try:
+            in_ch = int(getattr(self._ml_pipeline.model.cfg, 'in_channels', 3))
+        except Exception:
+            in_ch = 3
+        extra_feat = max(0, in_ch - 3)
+        feat = np.zeros((points.shape[0], extra_feat), dtype=np.float32) if extra_feat > 0 else None
+        data = { 'point': points, 'feat': feat, 'label': labels_dummy }
+        results = self._ml_pipeline.run_inference(data)
+        pred = results.get('predict_labels')
+        if pred is None:
+            raise RuntimeError('Pipeline не вернул predict_labels')
+        return pred.astype(np.int32)
+
+    def _get_class_names_and_colors(self, cfg_name):
+        """Вернуть фиксированные имена и цвета классов для выбранного конфига."""
+        if cfg_name == 'randlanet_toronto3d':
+            names = [
+                'Road', 'Road marking', 'Natural', 'Building',
+                'Utility line', 'Pole', 'Car', 'Fence'
+            ]
+            colors = [
+                (128, 128, 128),  # Road
+                (255, 255, 255),  # Road marking
+                (0, 255, 0),      # Natural
+                (255, 0, 0),      # Building
+                (255, 255, 0),    # Utility line
+                (0, 0, 255),      # Pole
+                (255, 0, 255),    # Car
+                (0, 255, 255),    # Fence
+            ]
+        elif cfg_name == 'randlanet_semantickitti':
+            # SemanticKITTI: 20 классов (включая 'unlabeled')
+            names = [
+                'Unlabeled', 'Car', 'Bicycle', 'Motorcycle', 'Truck', 'Other-vehicle',
+                'Person', 'Bicyclist', 'Motorcyclist', 'Road', 'Parking', 'Sidewalk',
+                'Other-ground', 'Building', 'Fence', 'Vegetation', 'Trunk', 'Terrain',
+                'Pole', 'Traffic-sign'
+            ]
+            # Палитра (интуитивные, различимые цвета)
+            colors = [
+                (0, 0, 0),        # Unlabeled
+                (245, 150, 100),  # Car
+                (245, 230, 100),  # Bicycle
+                (150, 60, 30),    # Motorcycle
+                (180, 30, 80),    # Truck
+                (255, 0, 0),      # Other-vehicle
+                (30, 30, 255),    # Person
+                (200, 40, 255),   # Bicyclist
+                (90, 30, 150),    # Motorcyclist
+                (255, 0, 255),    # Road
+                (255, 150, 255),  # Parking
+                (75, 0, 75),      # Sidewalk
+                (75, 0, 175),     # Other-ground
+                (0, 200, 255),    # Building
+                (50, 120, 255),   # Fence
+                (0, 175, 0),      # Vegetation
+                (0, 60, 135),     # Trunk
+                (80, 240, 150),   # Terrain
+                (150, 240, 255),  # Pole
+                (0, 0, 255),      # Traffic-sign
+            ]
+        else:
+            # Hack2C / RandLA-Net (2 класса)
+            names = ['Background', 'Car']
+            colors = [
+                (128, 128, 128),  # Background
+                (255, 0, 0),      # Car
+            ]
+        return names, colors
+
+    def _populate_class_combos(self, cloud_name):
+        """Заполнить comboBox_transform и comboBox_remove классами из данных облака.
+
+        Предпочитается поле 'predict'; если его нет — используем 'label'. Комбобоксы
+        остаются пустыми до выполнения инференса.
+        """
+        try:
+            if not hasattr(self.ui, 'comboBox_transform') or not hasattr(self.ui, 'comboBox_remove'):
+                return
+            cloud = self.point_clouds.get(cloud_name)
+            if not cloud:
+                return
+            poly = cloud.get('poly_data')
+            if poly is None:
+                self.ui.comboBox_transform.clear()
+                self.ui.comboBox_remove.clear()
+                return
+
+            # Выбираем источник классов
+            source_field = None
+            if 'predict' in poly.array_names:
+                source_field = 'predict'
+            elif 'label' in poly.array_names:
+                source_field = 'label'
+            if source_field is None:
+                self.ui.comboBox_transform.clear()
+                self.ui.comboBox_remove.clear()
+                return
+
+            import numpy as np
+            preds = np.asarray(poly[source_field]).reshape(-1)
+            uniq = np.unique(preds)
+
+            cfg_name = cloud.get('predict_cfg') if isinstance(cloud.get('predict_cfg'), str) else self._get_selected_cfg_name()
+            names, colors = self._get_class_names_and_colors(cfg_name)
+
+            self.ui.comboBox_transform.blockSignals(True)
+            self.ui.comboBox_remove.blockSignals(True)
+            self.ui.comboBox_transform.clear()
+            self.ui.comboBox_remove.clear()
+
+            for cls_id in uniq.tolist():
+                cls_int = int(cls_id)
+                title = names[cls_int] if 0 <= cls_int < len(names) else f"Class {cls_int}"
+                color = colors[cls_int % len(colors)]
+                qcol = QColor(color[0], color[1], color[2])
+
+                self.ui.comboBox_transform.addItem(title, cls_int)
+                idx_s = self.ui.comboBox_transform.count() - 1
+                self.ui.comboBox_transform.setItemData(idx_s, QBrush(qcol), Qt.BackgroundRole)
+
+                self.ui.comboBox_remove.addItem(title, cls_int)
+                idx_r = self.ui.comboBox_remove.count() - 1
+                self.ui.comboBox_remove.setItemData(idx_r, QBrush(qcol), Qt.BackgroundRole)
+
+            self.ui.comboBox_transform.blockSignals(False)
+            self.ui.comboBox_remove.blockSignals(False)
+        except Exception:
+            pass
+
+    def on_click_analyze_net(self):
+        """Обработчик кнопки анализа: инференс по текущему облаку и показ predict."""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if not cloud_name or cloud_name not in self.point_clouds:
+            QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+            return
+
+        btn = self.ui.pushButton_analys_net if hasattr(self.ui, 'pushButton_analys_net') else None
+        if btn is not None:
+            btn.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            # 1) Инициализируем/берем pipeline
+            self._ensure_ml_pipeline()
+            # 2) Достаём точки текущего облака
+            cloud = self.point_clouds[cloud_name]
+            poly = cloud['poly_data']
+            pts = np.asarray(poly.points)
+            if pts.size == 0:
+                QMessageBox.warning(self, 'Предупреждение', 'Облако пустое')
+                return
+            # 3) Запускаем инференс
+            pred = self._run_inference_on_points(pts[:, :3])
+            if pred.shape[0] != pts.shape[0]:
+                QMessageBox.warning(self, 'Предупреждение', 'Размер предсказаний не совпадает с числом точек')
+                return
+            # 4) Кладём предсказания в poly_data и применяем режим
+            cloud['poly_data']['predict'] = pred
+            cloud['predict_cfg'] = self._get_selected_cfg_name()
+            cloud['color_mode'] = 'predict'
+            self.apply_point_color_mode(cloud_name, 'predict')
+            # После инференса заполняем трансформ и remove классами выбранной нейросети
+            self._populate_class_combos(cloud_name)
+            self._populate_transform_combo(cloud_name)
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка инференса', str(e))
+        finally:
+            QApplication.restoreOverrideCursor()
+            if btn is not None:
+                btn.setEnabled(True)
+
+    def on_click_export(self):
+        """Экспорт текущего облака точек в выбранный формат (пока .pcd)."""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+            return
+
+        fmt = None
+        try:
+            fmt = self.ui.comboBox_export.currentText().strip().lower()
+        except Exception:
+            fmt = '.pcd'
+        if fmt not in ('.pcd', 'pcd'):
+            QMessageBox.information(self, 'Инфо', f'Формат {fmt} пока не поддерживается')
+            return
+
+        # Диалог выбора файла
+        default_name = os.path.splitext(cloud_name)[0] + '.pcd'
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            'Сохранить облако точек как PCD',
+            default_name,
+            'PCD files (*.pcd)'
+        )
+        if not out_path:
+            return
+        if not out_path.lower().endswith('.pcd'):
+            out_path += '.pcd'
+
+        try:
+            import open3d.core as o3c
+            poly = cloud['poly_data']
+            pts = np.asarray(poly.points).astype(np.float32)
+
+            tpc = o3d.t.geometry.PointCloud()
+            tpc.point['positions'] = o3c.Tensor(pts)
+
+            # Сохраняем цвета, если есть
+            if 'colors' in poly.array_names:
+                cols = np.asarray(poly['colors']).astype(np.uint8)
+                tpc.point['colors'] = o3c.Tensor(cols)
+
+            # intensity
+            if 'intensity' in poly.array_names:
+                intens = np.asarray(poly['intensity']).reshape(-1, 1).astype(np.float32)
+                tpc.point['intensity'] = o3c.Tensor(intens)
+
+            # label
+            if 'label' in poly.array_names:
+                labels = np.asarray(poly['label']).reshape(-1, 1).astype(np.int32)
+                tpc.point['label'] = o3c.Tensor(labels)
+
+            # predict
+            if 'predict' in poly.array_names:
+                preds = np.asarray(poly['predict']).reshape(-1, 1).astype(np.int32)
+                tpc.point['predict'] = o3c.Tensor(preds)
+
+            # height как вспомогательный скаляр (опционально)
+            if 'height' in poly.array_names:
+                h = np.asarray(poly['height']).reshape(-1, 1).astype(np.float32)
+                tpc.point['height'] = o3c.Tensor(h)
+
+            # Запись PCD (binary)
+            o3d.t.io.write_point_cloud(out_path, tpc, write_ascii=False)
+            QMessageBox.information(self, 'Экспорт', f'Сохранено: {out_path}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка экспорта', f'Не удалось сохранить PCD: {str(e)}')
+    
+    def setup_pyvista_widget(self):
+        """Настройка PyVista виджета в frame_view"""
+        layout = QVBoxLayout(self.ui.frame_view)
+        
+        self.plotter = pvqt.QtInteractor(self.ui.frame_view)
+        layout.addWidget(self.plotter.interactor)
+
+        self.plotter.enable_trackball_style()
+        self.plotter.enable_eye_dome_lighting()
+        self.plotter.enable_parallel_projection()
+        
+        self.plotter.set_background('white')
+        self.plotter.show_axes()
+        
+    def setup_tree_widget(self):
+        """Настройка treeWidget"""
+        self.ui.treeWidget.clear()
+        self.ui.treeWidget.setHeaderLabels(['Имя'])
+        self.ui.treeWidget.setColumnCount(1)
+        
+    def import_pcd(self):
+        """Импорт PCD файлов"""
+        file_dialog = QFileDialog()
+        file_paths, _ = file_dialog.getOpenFileNames(
+            self,
+            'Выберите файлы облаков точек',
+            '',
+            'Point clouds (*.pcd *.ply *.bin);;PCD files (*.pcd);;PLY files (*.ply);;BIN files (*.bin);;All files (*.*)'
+        )
+        
+        for file_path in file_paths:
+            self.load_pcd_file(file_path)
+            
+    def load_pcd_file(self, file_path):
+        """Загрузка одного PCD файла"""
+        try:
+            # Определяем расширение
+            ext = os.path.splitext(file_path)[1].lower()
+            intensity_from_bin = None
+            # Загрузка через open3d или парсинг .bin (KITTI-формат)
+            if ext == '.bin':
+                points_arr, intensity_from_bin = self._read_bin_points(file_path)
+                if points_arr.size == 0:
+                    QMessageBox.warning(self, 'Ошибка', f'Файл {file_path} пуст или поврежден')
+                    return
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(points_arr.astype(np.float32))
+            else:
+                pcd = o3d.io.read_point_cloud(file_path)
+            
+            if len(pcd.points) == 0:
+                QMessageBox.warning(self, 'Ошибка', f'Файл {file_path} пуст или поврежден')
+                return
+                
+            # Получение имени файла
+            file_name = os.path.basename(file_path)
+            
+            # Проверка на дубликаты
+            original_name = file_name
+            counter = 1
+            while file_name in self.point_clouds:
+                file_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Конвертация в numpy массивы
+            points = np.asarray(pcd.points)
+            
+            # Проверка наличия цветов
+            if pcd.has_colors():
+                colors = np.asarray(pcd.colors) * 255  # open3d использует 0-1, pyvista 0-255
+            else:
+                colors = None
+            
+            # Создание PyVista PolyData
+            poly_data = pv.PolyData(points)
+            if colors is not None:
+                poly_data['colors'] = colors.astype(np.uint8)
+            # Скаляр для градиента по высоте
+            poly_data['height'] = points[:, 2]
+
+            # Пытаемся прочитать дополнительные атрибуты через Open3D Tensor API (интенсивность/лейблы)
+            if ext != '.bin':
+                try:
+                    pcd_t = o3d.t.io.read_point_cloud(file_path)
+                    # intensity
+                    if 'intensity' in pcd_t.point:
+                        intensity = pcd_t.point['intensity'].numpy().reshape(-1)
+                        if intensity.shape[0] == points.shape[0]:
+                            poly_data['intensity'] = intensity.astype(float)
+                    # label
+                    if 'label' in pcd_t.point:
+                        labels = pcd_t.point['label'].numpy().reshape(-1)
+                        if labels.shape[0] == points.shape[0]:
+                            poly_data['label'] = labels.astype(int)
+                    # predict
+                    if 'predict' in pcd_t.point:
+                        preds = pcd_t.point['predict'].numpy().reshape(-1)
+                        if preds.shape[0] == points.shape[0]:
+                            poly_data['predict'] = preds.astype(int)
+                except Exception:
+                    pass
+            else:
+                # Для .bin поддержим intensity, если прочитали
+                if intensity_from_bin is not None and intensity_from_bin.shape[0] == points.shape[0]:
+                    poly_data['intensity'] = intensity_from_bin.astype(float)
+            
+            # Добавление в плоттер (временно белым, без colorbar)
+            actor = self.plotter.add_mesh(poly_data, color='white', point_size=3, show_scalar_bar=False)
+            
+            # Сохранение данных
+            self.point_clouds[file_name] = {
+                'pcd': pcd,
+                'poly_data': poly_data,
+                'actor': actor,
+                'visible': True,
+                'file_path': file_path
+            }
+            # Инициализация структуры выделения точек
+            self.point_clouds[file_name]['selected_indices'] = set()
+            self.point_clouds[file_name]['selection_actor'] = None
+            
+            # Добавление в treeWidget
+            self.add_cloud_to_tree(file_name)
+
+            # Немедленно применяем выбранный режим цвета из комбобокса
+            index = self.ui.comboBox_point_color.currentIndex()
+            mode = self.mode_by_index.get(index, 'height')
+            # Сохраняем режим на облаке и применяем
+            self.point_clouds[file_name]['color_mode'] = mode
+            self.apply_point_color_mode(file_name, mode)
+            
+            # Автоматическая подгонка камеры
+            self.plotter.reset_camera()
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка загрузки', f'Не удалось загрузить файл {file_path}:\n{str(e)}')
+
+    def _read_bin_points(self, file_path):
+        """Прочитать .bin (KITTI) файл и вернуть (Nx3 float32 points, N intensity or None)."""
+        try:
+            data = np.fromfile(file_path, dtype=np.float32)
+            if data.size == 0:
+                return np.empty((0, 3), dtype=np.float32), None
+            if data.size % 4 == 0:
+                pts = data.reshape(-1, 4)
+                return pts[:, :3], pts[:, 3]
+            elif data.size % 3 == 0:
+                pts = data.reshape(-1, 3)
+                return pts[:, :3], None
+            else:
+                # Нестандартный формат — попытаемся взять первые 3 колонки как XYZ
+                n = data.size // 3
+                if n > 0:
+                    pts = data[:n*3].reshape(-1, 3)
+                    return pts[:, :3], None
+                return np.empty((0, 3), dtype=np.float32), None
+        except Exception:
+            return np.empty((0, 3), dtype=np.float32), None
+    
+    def add_cloud_to_tree(self, cloud_name):
+        """Добавление облака в дерево"""
+        item = QTreeWidgetItem(self.ui.treeWidget)
+        item.setText(0, cloud_name)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.Checked)
+        
+        # Связываем элемент дерева с именем облака
+        item.setData(0, Qt.UserRole, cloud_name)
+        
+    def on_tree_item_changed(self, item, column):
+        """Обработка изменения состояния чекбокса"""
+        if column == 0:
+            cloud_name = item.data(0, Qt.UserRole)
+            if cloud_name and cloud_name in self.point_clouds:
+                is_checked = item.checkState(0) == Qt.Checked
+                self.set_cloud_visibility(cloud_name, is_checked)
+
+    def on_tree_current_item_changed(self, current, previous):
+        """Обновление информации при смене выбранного элемента"""
+        if current is None:
+            self.ui.label_count_value.setText("0")
+            self.ui.label_center_value_x.setText("X:0")
+            self.ui.label_center_value_y.setText("Y:0")
+            self.ui.label_center_value_z.setText("Z:0")
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name in self.point_clouds:
+            pcd = self.point_clouds[cloud_name]['pcd']
+            self.ui.label_count_value.setText(str(len(pcd.points)))
+            # Обновляем центр
+            cx, cy, cz = pcd.get_center()
+            self.ui.label_center_value_x.setText(f"X:{cx:.3f}")
+            self.ui.label_center_value_y.setText(f"Y:{cy:.3f}")
+            self.ui.label_center_value_z.setText(f"Z:{cz:.3f}")
+            # Синхронизируем размер точек со спинбоксом
+            actor = self.point_clouds[cloud_name]['actor']
+            self.ui.spinBox_point_size.setValue(int(actor.GetProperty().GetPointSize()))
+            # Синхронизируем режим цвета точек согласно сохраненному состоянию облака
+            cloud_data = self.point_clouds[cloud_name]
+            mode = cloud_data.get('color_mode', 'height')
+            idx = self.index_by_mode.get(mode, 0)
+            self.ui.comboBox_point_color.blockSignals(True)
+            self.ui.comboBox_point_color.setCurrentIndex(idx)
+            self.ui.comboBox_point_color.blockSignals(False)
+            # Больше не заполняем комбобоксы при смене облака — они пустые до инференса
+        else:
+            self.ui.label_count_value.setText("0")
+            self.ui.label_center_value_x.setText("X:0")
+            self.ui.label_center_value_y.setText("Y:0")
+            self.ui.label_center_value_z.setText("Z:0")
+
+    def on_point_size_changed(self, value):
+        """Изменение размера точек у выбранного облака"""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name in self.point_clouds:
+            actor = self.point_clouds[cloud_name]['actor']
+            actor.GetProperty().SetPointSize(int(value))
+            self.plotter.render()
+
+    def on_eye_dome_changed(self, index):
+        """Вкл/Выкл Eye Dome Lighting из комбобокса"""
+        try:
+            if index == 0:  # Вкл
+                self.plotter.enable_eye_dome_lighting()
+            else:  # Выкл
+                self.plotter.disable_eye_dome_lighting()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def _populate_transform_combo(self, cloud_name):
+        """Заполнить comboBox_transform доступными классами для назначения."""
+        try:
+            if not hasattr(self.ui, 'comboBox_transform'):
+                return
+            cloud = self.point_clouds.get(cloud_name)
+            if not cloud:
+                return
+            poly = cloud.get('poly_data')
+
+            # Определяем доступные классы: сначала по данным облака, затем по конфигу
+            class_ids = []
+            if poly is not None:
+                if 'predict' in poly.array_names:
+                    class_ids = np.unique(np.asarray(poly['predict']).reshape(-1)).tolist()
+                elif 'label' in poly.array_names:
+                    class_ids = np.unique(np.asarray(poly['label']).reshape(-1)).tolist()
+
+            cfg_name = cloud.get('predict_cfg') if isinstance(cloud.get('predict_cfg'), str) else self._get_selected_cfg_name()
+            names, colors = self._get_class_names_and_colors(cfg_name)
+            if not class_ids:
+                class_ids = list(range(len(names)))
+
+            self.ui.comboBox_transform.blockSignals(True)
+            self.ui.comboBox_transform.clear()
+            for cls_id in class_ids:
+                cls_int = int(cls_id)
+                title = names[cls_int] if 0 <= cls_int < len(names) else f"Class {cls_int}"
+                color = colors[cls_int % len(colors)] if colors else (200, 200, 200)
+                qcol = QColor(color[0], color[1], color[2])
+                self.ui.comboBox_transform.addItem(title, cls_int)
+                idx = self.ui.comboBox_transform.count() - 1
+                self.ui.comboBox_transform.setItemData(idx, QBrush(qcol), Qt.BackgroundRole)
+            self.ui.comboBox_transform.blockSignals(False)
+        except Exception:
+            pass
+
+    def on_click_transform(self):
+        """Преобразовать выделенные точки в выбранный класс из comboBox_transform."""
+        try:
+            current = self.ui.treeWidget.currentItem()
+            if current is None:
+                QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+                return
+            cloud_name = current.data(0, Qt.UserRole)
+            cloud = self.point_clouds.get(cloud_name)
+            if not cloud:
+                QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+                return
+            if not hasattr(self.ui, 'comboBox_transform'):
+                QMessageBox.information(self, 'Инфо', 'comboBox_transform не найден')
+                return
+
+            target_cls = self.ui.comboBox_transform.currentData()
+            if target_cls is None:
+                QMessageBox.information(self, 'Инфо', 'Класс для преобразования не выбран')
+                return
+
+            poly = cloud.get('poly_data')
+            if poly is None or len(poly.points) == 0:
+                QMessageBox.information(self, 'Инфо', 'Нет данных точек для преобразования')
+                return
+
+            sel = cloud.get('selected_indices', set())
+            if not sel:
+                QMessageBox.information(self, 'Инфо', 'Нет выделенных точек для преобразования')
+                return
+
+            indices = np.array(sorted(list(sel)), dtype=int)
+
+            updated_field = None
+            if 'predict' in poly.array_names:
+                arr = np.asarray(poly['predict']).copy()
+                arr[indices] = int(target_cls)
+                poly['predict'] = arr
+                updated_field = 'predict'
+            elif 'label' in poly.array_names:
+                arr = np.asarray(poly['label']).copy()
+                arr[indices] = int(target_cls)
+                poly['label'] = arr
+                updated_field = 'label'
+            else:
+                arr = np.zeros(len(poly.points), dtype=int)
+                arr[indices] = int(target_cls)
+                poly['predict'] = arr
+                updated_field = 'predict'
+
+            # Обновляем окраску, если активен соответствующий режим
+            mode = cloud.get('color_mode', 'height')
+            if mode in ('predict', 'label') and updated_field in ('predict', 'label'):
+                self.apply_point_color_mode(cloud_name, mode)
+
+            # Обновим списки классов и оверлей
+            self._populate_class_combos(cloud_name)
+            self._populate_transform_combo(cloud_name)
+            self.update_selection_overlay(cloud_name)
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось преобразовать точки: {str(e)}')
+
+    def on_display_mode_changed(self, index):
+        """Переключение ортографического/перспективного режима"""
+        try:
+            if index == 0:  # Ортографический
+                self.plotter.enable_parallel_projection()
+            else:  # Перспективный
+                self.plotter.disable_parallel_projection()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_background_color_changed(self, index):
+        """Смена цвета фона сцены из комбобокса"""
+        try:
+            if 0 <= index < len(self.background_palette):
+                color = self.background_palette[index][1]
+            else:
+                color = 'white'
+            self.plotter.set_background(color)
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_zoom_up(self):
+        """Увеличить масштаб камеры"""
+        try:
+            self.plotter.camera.Zoom(1.2)
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_zoom_down(self):
+        """Уменьшить масштаб камеры"""
+        try:
+            self.plotter.camera.Zoom(1.0/1.2)
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_reset_view(self):
+        """Сбросить вид так, чтобы было видно все"""
+        try:
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_front(self):
+        """Вид спереди (с +Y к центру)"""
+        try:
+            self.plotter.view_xz(negative=False)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_back(self):
+        """Вид сзади (с -Y к центру)"""
+        try:
+            self.plotter.view_xz(negative=True)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_left(self):
+        """Вид слева (с -X к центру)"""
+        try:
+            self.plotter.view_yz(negative=True)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_right(self):
+        """Вид справа (с +X к центру)"""
+        try:
+            self.plotter.view_yz(negative=False)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_top(self):
+        """Вид сверху (с +Z к центру)"""
+        try:
+            self.plotter.view_xy(negative=False)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_view_bottom(self):
+        """Вид снизу (с -Z к центру)"""
+        try:
+            self.plotter.view_xy(negative=True)
+            self.plotter.reset_camera()
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def on_point_color_changed(self, index):
+        """Смена цвета точек у выбранного облака"""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name not in self.point_clouds:
+            return
+        mode = self.mode_by_index.get(index, 'height')
+        # Сохраняем выбранный режим на уровне облака
+        self.point_clouds[cloud_name]['color_mode'] = mode
+        self.apply_point_color_mode(cloud_name, mode)
+
+    def apply_point_color_mode(self, cloud_name, mode):
+        """Применить режим окраски точек к облаку"""
+        cloud_data = self.point_clouds[cloud_name]
+        poly_data = cloud_data['poly_data']
+        old_actor = cloud_data['actor']
+        point_size = int(old_actor.GetProperty().GetPointSize())
+        was_visible = cloud_data.get('visible', True)
+
+        # Удаляем старый актор
+        try:
+            self.plotter.remove_actor(old_actor)
+        except Exception:
+            pass
+
+        # Выбор параметров отображения
+        kwargs = { 'point_size': point_size, 'show_scalar_bar': False }
+
+        if mode == 'rgb' and 'colors' in poly_data.array_names:
+            kwargs.update({ 'scalars': 'colors', 'rgb': True })
+        elif mode == 'rgb':
+            kwargs.update({ 'color': 'white' })
+        elif mode == 'intensity':
+            # Ищем массив интенсивностей
+            intensity_name = None
+            for name in poly_data.array_names:
+                lname = name.lower()
+                if 'intens' in lname:
+                    intensity_name = name
+                    break
+            if intensity_name is not None:
+                kwargs.update({ 'scalars': intensity_name, 'cmap': 'viridis' })
+            else:
+                kwargs.update({ 'color': 'white' })
+        if mode == 'label' and 'label' in poly_data.array_names:
+            kwargs.update({ 'scalars': 'label', 'cmap': 'tab20' })
+        elif mode == 'label':
+            kwargs.update({ 'color': 'white' })
+        elif mode == 'predict' and 'predict' in poly_data.array_names:
+            # Переопределим цвета для predict на фиксированные цвета классов
+            try:
+                # Построим кастомный colormap на основе фиксированных RGB
+                import matplotlib.colors as mcolors
+                cfg_name = self._get_selected_cfg_name()
+                names, colors = self._get_class_names_and_colors(cfg_name)
+                # colors в 0..255 -> 0..1
+                colors01 = [(r/255.0, g/255.0, b/255.0) for (r, g, b) in colors]
+                # Сгенерируем дискретный ListedColormap
+                cmap = mcolors.ListedColormap(colors01, name='fixed_pred')
+                kwargs.update({ 'scalars': 'predict', 'cmap': cmap })
+            except Exception:
+                kwargs.update({ 'scalars': 'predict', 'cmap': 'tab20' })
+        elif mode == 'predict':
+            kwargs.update({ 'color': 'white' })
+        elif mode == 'height':
+            # Градиент по высоте: снизу синий, сверху красный
+            kwargs.update({ 'scalars': 'height', 'cmap': 'coolwarm' })
+        elif mode in ('white', 'black', 'blue', 'gray'):
+            kwargs.update({ 'color': mode })
+        else:
+            kwargs.update({ 'color': 'white' })
+
+        # Добавляем новый актор
+        new_actor = self.plotter.add_mesh(poly_data, **kwargs)
+        # Сохраняем текущую видимость
+        if not was_visible:
+            try:
+                new_actor.SetVisibility(False)
+            except Exception:
+                pass
+        cloud_data['actor'] = new_actor
+        self.plotter.render()
+    
+    def set_cloud_visibility(self, cloud_name, visible):
+        """Установка видимости облака"""
+        if cloud_name in self.point_clouds:
+            cloud_data = self.point_clouds[cloud_name]
+            actor = cloud_data['actor']
+            
+            if visible:
+                if not cloud_data['visible']:
+                    # Показать облако
+                    actor.SetVisibility(True)
+                    cloud_data['visible'] = True
+                    # Показать оверлей выделения, если есть
+                    if cloud_data.get('selection_actor') is not None:
+                        try:
+                            cloud_data['selection_actor'].SetVisibility(True)
+                        except Exception:
+                            pass
+            else:
+                if cloud_data['visible']:
+                    # Скрыть облако
+                    actor.SetVisibility(False)
+                    cloud_data['visible'] = False
+                    # Скрыть оверлей выделения, если есть
+                    if cloud_data.get('selection_actor') is not None:
+                        try:
+                            cloud_data['selection_actor'].SetVisibility(False)
+                        except Exception:
+                            pass
+                    
+                    # Очистка при скрытии облака
+                try:
+                    if hasattr(self.plotter, 'picker'):
+                        self.plotter.picker = None
+                except Exception:
+                    pass
+            
+            # Обновить рендер
+            self.plotter.render()
+    
+    def show_context_menu(self, position):
+        """Показать контекстное меню для элемента дерева"""
+        item = self.ui.treeWidget.itemAt(position)
+        if item is None:
+            return
+            
+        cloud_name = item.data(0, Qt.UserRole)
+        if not cloud_name or cloud_name not in self.point_clouds:
+            return
+            
+        # Создаем контекстное меню
+        context_menu = QMenu(self)
+        
+        # Очистка выделения точек
+        clear_sel_action = context_menu.addAction("Очистить выделение")
+        clear_sel_action.triggered.connect(lambda: self.clear_selection(cloud_name))
+        
+        # Удаление выделенных точек
+        del_sel_action = context_menu.addAction("Удалить выделенные точки")
+        del_sel_action.triggered.connect(lambda: self.delete_selected_points(cloud_name))
+        
+        # Интерполяция области
+        fill_hole_action = context_menu.addAction("Интерполировать область (beta)")
+        fill_hole_action.triggered.connect(lambda: self.fill_hole(cloud_name))
+        
+        context_menu.addSeparator()
+        
+        # Добавляем действие удаления
+        delete_action = context_menu.addAction("Удалить")
+        delete_action.triggered.connect(lambda: self.delete_cloud(cloud_name))
+        
+        # Показываем меню в глобальных координатах
+        context_menu.exec_(self.ui.treeWidget.mapToGlobal(position))
+    
+    def delete_cloud(self, cloud_name):
+        """Удаление облака точек"""
+        if cloud_name not in self.point_clouds:
+            return
+            
+        # Подтверждение удаления
+        reply = QMessageBox.question(
+            self, 
+            'Подтверждение удаления', 
+            f'Вы уверены, что хотите удалить облако "{cloud_name}"?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+            
+        try:
+            # Получаем данные облака
+            cloud_data = self.point_clouds[cloud_name]
+            actor = cloud_data['actor']
+            
+            # Удаляем актор из плоттера
+            self.plotter.remove_actor(actor)
+            
+            # Удаляем из словаря
+            del self.point_clouds[cloud_name]
+            
+            # Удаляем из дерева
+            self.remove_cloud_from_tree(cloud_name)
+            
+            # Обновляем рендер
+            self.plotter.render()
+            
+            # Обновляем счетчик по текущему выделению
+            current = self.ui.treeWidget.currentItem()
+            if current is not None:
+                self.on_tree_current_item_changed(current, None)
+            else:
+                self.ui.label_count_value.setText("0")
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка удаления', f'Не удалось удалить облако {cloud_name}:\n{str(e)}')
+    
+    def remove_cloud_from_tree(self, cloud_name):
+        """Удаление элемента из дерева"""
+        root = self.ui.treeWidget.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.data(0, Qt.UserRole) == cloud_name:
+                root.removeChild(item)
+                break
+
+    def on_toggle_point_select(self, checked):
+        """Вкл/Выкл режима покликового выбора точек правой кнопкой"""
+        self.selection_mode = bool(checked)
+        
+        # Взаимное исключение режимов
+        if self.selection_mode and self.brush_mode:
+            self.brush_mode = False
+            self.ui.pushButton_brush.setChecked(False)
+        
+        try:
+            if self.selection_mode:
+                # Отключаем любой предыдущий picking перед включением нового
+                try:
+                    if hasattr(self.plotter, 'disable_picking'):
+                        self.plotter.disable_picking()
+                except Exception:
+                    pass
+                
+                # Сохраняем текущую позицию камеры перед включением picking
+                saved_camera_pos = self.plotter.camera_position
+                
+                # Включаем point picking
+                try:
+                    self.plotter.enable_point_picking(
+                        callback=self.on_point_pick,
+                        left_clicking=False,
+                        show_message=False,
+                        show_point=False,
+                        color='white',
+                        opacity=0.0
+                    )
+                except Exception:
+                    pass
+                
+                # Восстанавливаем позицию камеры после включения picking
+                self.plotter.camera_position = saved_camera_pos
+                self.plotter.render()
+                
+                # Устанавливаем фокус на главное окно для обработки клавиш
+                self.setFocus()
+            else:
+                # Отключаем picking
+                try:
+                    if hasattr(self.plotter, 'disable_picking'):
+                        self.plotter.disable_picking()
+                except Exception:
+                    pass
+                
+                # Очистка внутреннего выделения PyVista
+                try:
+                    if hasattr(self.plotter, 'picker'):
+                        self.plotter.picker = None
+                    self.plotter.render()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        self.update_status_bar()
+
+    def on_point_pick(self, picked_point):
+        """Правый клик: выбрать/снять выбор точки у текущего облака"""
+        try:
+            # Проверяем, что режим выделения включен
+            if not self.selection_mode:
+                return
+                
+            # Сохраняем текущее состояние камеры
+            camera_pos = self.plotter.camera_position
+            
+            current = self.ui.treeWidget.currentItem()
+            if current is None:
+                return
+            cloud_name = current.data(0, Qt.UserRole)
+            if cloud_name not in self.point_clouds:
+                return
+            
+            cloud = self.point_clouds[cloud_name]
+            pts = np.asarray(cloud['poly_data'].points)
+            if pts.size == 0:
+                return
+                
+            # Найдем ближайшую точку к месту клика
+            p = np.asarray(picked_point, dtype=float).reshape(1, 3)
+            d2 = np.sum((pts - p) ** 2, axis=1)
+            idx = int(np.argmin(d2))
+            
+            # Переключаем выделение
+            sel = cloud.get('selected_indices', set())
+            if idx in sel:
+                sel.remove(idx)
+            else:
+                sel.add(idx)
+            cloud['selected_indices'] = sel
+            
+            # Обновляем визуальный оверлей
+            self.update_selection_overlay(cloud_name)
+            
+            # Восстанавливаем позицию камеры
+            self.plotter.camera_position = camera_pos
+            
+        except Exception:
+            pass
+
+    def update_selection_overlay(self, cloud_name):
+        """Обновить визуальный оверлей выделенных точек"""
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            return
+            
+        try:
+            # Удаляем старый оверлей
+            if cloud.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud['selection_actor'])
+                except Exception:
+                    pass
+                cloud['selection_actor'] = None
+
+            sel = cloud.get('selected_indices', set())
+            if not sel:
+                self.plotter.render()
+                return
+
+            # Создаем оверлей из выделенных точек
+            total = len(cloud['poly_data'].points)
+            mask = np.zeros(total, dtype=bool)
+            mask[list(sel)] = True
+            sub = cloud['poly_data'].extract_points(mask, include_cells=False)
+
+            # Размер точек для оверлея
+            point_size = max(1, int(self.ui.spinBox_point_size.value()) + 2)
+            actor = self.plotter.add_mesh(
+                sub,
+                color='yellow',
+                point_size=point_size,
+                show_scalar_bar=False,
+                pickable=False,
+            )
+            
+            # Учитываем видимость основного облака
+            if not cloud.get('visible', True):
+                try:
+                    actor.SetVisibility(False)
+                except Exception:
+                    pass
+                    
+            cloud['selection_actor'] = actor
+            self.plotter.render()
+            
+        except Exception:
+            pass
+
+    def clear_selection(self, cloud_name):
+        """Очистить выделение точек у облака"""
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            return
+            
+        try:
+            cloud['selected_indices'] = set()
+            if cloud.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud['selection_actor'])
+                except Exception:
+                    pass
+                cloud['selection_actor'] = None
+            self.plotter.render()
+        except Exception:
+            pass
+
+    def delete_selected_points(self, cloud_name):
+        """Удалить выделенные точки из облака"""
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            return
+            
+        sel = cloud.get('selected_indices', set())
+        if not sel:
+            QMessageBox.information(self, 'Инфо', 'Нет выделенных точек для удаления')
+            return
+            
+        # Подтверждение удаления
+        reply = QMessageBox.question(
+            self, 
+            'Подтверждение удаления', 
+            f'Удалить {len(sel)} выделенных точек из облака "{cloud_name}"?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+            
+        try:
+            # Создаем маску для сохранения невыделенных точек
+            total = len(cloud['poly_data'].points)
+            keep_mask = np.ones(total, dtype=bool)
+            keep_mask[list(sel)] = False
+            
+            # Извлекаем невыделенные точки
+            new_poly_data = cloud['poly_data'].extract_points(keep_mask, include_cells=False)
+            
+            if len(new_poly_data.points) == 0:
+                QMessageBox.warning(self, 'Предупреждение', 'Удаление всех точек приведет к пустому облаку')
+                return
+                
+            # Обновляем Open3D объект
+            new_points = np.asarray(new_poly_data.points)
+            cloud['pcd'].points = o3d.utility.Vector3dVector(new_points)
+            
+            # Обновляем цвета если есть
+            if 'colors' in new_poly_data.array_names:
+                colors = np.asarray(new_poly_data['colors']) / 255.0
+                cloud['pcd'].colors = o3d.utility.Vector3dVector(colors)
+            
+            # Обновляем poly_data
+            cloud['poly_data'] = new_poly_data
+            
+            # Очищаем выделение
+            cloud['selected_indices'] = set()
+            if cloud.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud['selection_actor'])
+                except Exception:
+                    pass
+                cloud['selection_actor'] = None
+            
+            # Применяем текущий режим окраски
+            mode = cloud.get('color_mode', 'height')
+            self.apply_point_color_mode(cloud_name, mode)
+            
+            # Обновляем информацию в интерфейсе
+            current = self.ui.treeWidget.currentItem()
+            if current and current.data(0, Qt.UserRole) == cloud_name:
+                self.on_tree_current_item_changed(current, None)
+                
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось удалить точки: {str(e)}')
+
+    def fill_hole(self, cloud_name):
+        """Заполнить дыру в облаке точек на основе выделенных граничных точек"""
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            return
+            
+        sel = cloud.get('selected_indices', set())
+        if not sel or len(sel) < 3:
+            QMessageBox.information(
+                self, 
+                'Инфо', 
+                'Выберите как минимум 3 граничные точки дыры для заполнения'
+            )
+            return
+        
+        # Диалог настройки параметров интерполяции
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Параметры интерполяции области')
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Параметр плотности
+        density_layout = QHBoxLayout()
+        density_label = QLabel('Коэффициент разреженности:')
+        density_spinbox = QDoubleSpinBox()
+        density_spinbox.setRange(1.0, 10.0)
+        density_spinbox.setSingleStep(0.5)
+        density_spinbox.setValue(2.0)
+        density_spinbox.setToolTip('Чем больше значение, тем реже точки (1.0 = исходная плотность)')
+        density_layout.addWidget(density_label)
+        density_layout.addWidget(density_spinbox)
+        dialog_layout.addLayout(density_layout)
+        
+        # Параметр шума
+        noise_layout = QHBoxLayout()
+        noise_label = QLabel('Уровень шума:')
+        noise_spinbox = QDoubleSpinBox()
+        noise_spinbox.setRange(0.0, 1.0)
+        noise_spinbox.setSingleStep(0.05)
+        noise_spinbox.setValue(0.1)
+        noise_spinbox.setToolTip('0.0 = без шума, 1.0 = максимальный шум (доля от среднего расстояния)')
+        noise_layout.addWidget(noise_label)
+        noise_layout.addWidget(noise_spinbox)
+        dialog_layout.addLayout(noise_layout)
+        
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('OK')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        density_factor = density_spinbox.value()
+        noise_level = noise_spinbox.value()
+            
+        try:
+            from scipy.spatial import Delaunay
+            from scipy.interpolate import griddata
+            
+            # Получаем выделенные точки (границы дыры)
+            poly_data = cloud['poly_data']
+            all_points = np.asarray(poly_data.points)
+            boundary_indices = np.array(sorted(list(sel)))
+            boundary_points = all_points[boundary_indices]
+            
+            # Вычисляем среднюю плотность выделенных точек
+            # (среднее расстояние до ближайшего соседа)
+            from scipy.spatial import KDTree
+            tree = KDTree(boundary_points)
+            distances, _ = tree.query(boundary_points, k=2)  # k=2: сама точка и ближайший сосед
+            avg_density = np.mean(distances[:, 1])  # берём расстояние до ближайшего соседа
+            
+            if avg_density <= 0:
+                avg_density = 0.1  # fallback значение
+            
+            # Применяем коэффициент разреженности
+            avg_density *= density_factor
+            
+            # Проецируем граничные точки на плоскость (используем локальную систему координат)
+            # Находим главные компоненты для определения плоскости
+            centroid = np.mean(boundary_points, axis=0)
+            centered = boundary_points - centroid
+            
+            # SVD для нахождения базиса плоскости
+            U, S, Vt = np.linalg.svd(centered)
+            # Первые два вектора из Vt — базис плоскости
+            basis_u = Vt[0]
+            basis_v = Vt[1]
+            normal = Vt[2]
+            
+            # Проецируем граничные точки на 2D координаты в плоскости
+            boundary_2d = np.column_stack([
+                np.dot(centered, basis_u),
+                np.dot(centered, basis_v)
+            ])
+            
+            # Создаём триангуляцию Делоне на 2D точках
+            tri = Delaunay(boundary_2d)
+            
+            # Создаём сетку точек внутри выпуклой оболочки граничных точек
+            min_x, min_y = boundary_2d.min(axis=0)
+            max_x, max_y = boundary_2d.max(axis=0)
+            
+            # Количество точек по каждой оси на основе плотности
+            n_x = int((max_x - min_x) / avg_density) + 1
+            n_y = int((max_y - min_y) / avg_density) + 1
+            
+            # Ограничиваем количество точек чтобы не было слишком много
+            n_x = min(max(n_x, 5), 500)
+            n_y = min(max(n_y, 5), 500)
+            
+            x_grid = np.linspace(min_x, max_x, n_x)
+            y_grid = np.linspace(min_y, max_y, n_y)
+            xx, yy = np.meshgrid(x_grid, y_grid)
+            grid_2d = np.column_stack([xx.ravel(), yy.ravel()])
+            
+            # Фильтруем точки: оставляем только те, что внутри выпуклой оболочки
+            simplex_indices = tri.find_simplex(grid_2d)
+            inside_mask = simplex_indices >= 0
+            inside_2d = grid_2d[inside_mask]
+            
+            if len(inside_2d) == 0:
+                QMessageBox.warning(
+                    self,
+                    'Предупреждение',
+                    'Не удалось создать точки внутри выделенной области'
+                )
+                return
+            
+            # Интерполируем Z-координату (высоту вдоль нормали к плоскости)
+            # Используем значения высоты граничных точек
+            boundary_heights = np.dot(centered, normal)
+            interpolated_heights = griddata(
+                boundary_2d,
+                boundary_heights,
+                inside_2d,
+                method='linear',
+                fill_value=np.mean(boundary_heights)
+            )
+            
+            # Преобразуем 2D координаты обратно в 3D
+            new_points_3d = centroid + \
+                inside_2d[:, 0:1] * basis_u + \
+                inside_2d[:, 1:2] * basis_v + \
+                interpolated_heights.reshape(-1, 1) * normal
+            
+            # Добавляем шум к новым точкам
+            if noise_level > 0:
+                # Генерируем случайный шум в 3D
+                noise_magnitude = avg_density * noise_level
+                noise = np.random.normal(0, noise_magnitude, new_points_3d.shape)
+                new_points_3d += noise
+            
+            # Добавляем новые точки к облаку
+            updated_points = np.vstack([all_points, new_points_3d])
+            
+            # Создаём новый poly_data с обновлёнными точками
+            new_poly_data = pv.PolyData(updated_points)
+            
+            # Копируем существующие атрибуты и добавляем значения для новых точек
+            n_old = len(all_points)
+            n_new = len(new_points_3d)
+            
+            # Цвета: для новых точек используем средний цвет граничных точек
+            if 'colors' in poly_data.array_names:
+                old_colors = np.asarray(poly_data['colors'])
+                boundary_colors = old_colors[boundary_indices]
+                avg_color = np.mean(boundary_colors, axis=0).astype(np.uint8)
+                new_colors = np.vstack([
+                    old_colors,
+                    np.tile(avg_color, (n_new, 1))
+                ])
+                new_poly_data['colors'] = new_colors
+            
+            # Height
+            new_poly_data['height'] = updated_points[:, 2]
+            
+            # Intensity: для новых точек используем среднюю интенсивность граничных
+            if 'intensity' in poly_data.array_names:
+                old_intensity = np.asarray(poly_data['intensity'])
+                boundary_intensity = old_intensity[boundary_indices]
+                avg_intensity = np.mean(boundary_intensity)
+                new_intensity = np.concatenate([
+                    old_intensity,
+                    np.full(n_new, avg_intensity)
+                ])
+                new_poly_data['intensity'] = new_intensity
+            
+            # Label: для новых точек используем наиболее частый лейбл границы
+            if 'label' in poly_data.array_names:
+                old_labels = np.asarray(poly_data['label'])
+                boundary_labels = old_labels[boundary_indices]
+                # Наиболее частый лейбл
+                unique, counts = np.unique(boundary_labels, return_counts=True)
+                most_common_label = unique[np.argmax(counts)]
+                new_labels = np.concatenate([
+                    old_labels,
+                    np.full(n_new, most_common_label, dtype=old_labels.dtype)
+                ])
+                new_poly_data['label'] = new_labels
+            
+            # Predict: аналогично label
+            if 'predict' in poly_data.array_names:
+                old_predict = np.asarray(poly_data['predict'])
+                boundary_predict = old_predict[boundary_indices]
+                unique, counts = np.unique(boundary_predict, return_counts=True)
+                most_common_predict = unique[np.argmax(counts)]
+                new_predict = np.concatenate([
+                    old_predict,
+                    np.full(n_new, most_common_predict, dtype=old_predict.dtype)
+                ])
+                new_poly_data['predict'] = new_predict
+            
+            # Обновляем Open3D объект
+            cloud['pcd'].points = o3d.utility.Vector3dVector(updated_points)
+            
+            # Обновляем poly_data
+            cloud['poly_data'] = new_poly_data
+            
+            # Очищаем выделение
+            cloud['selected_indices'] = set()
+            if cloud.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud['selection_actor'])
+                except Exception:
+                    pass
+                cloud['selection_actor'] = None
+            
+            # Применяем текущий режим окраски
+            mode = cloud.get('color_mode', 'height')
+            self.apply_point_color_mode(cloud_name, mode)
+            
+            # Обновляем информацию в интерфейсе
+            current = self.ui.treeWidget.currentItem()
+            if current and current.data(0, Qt.UserRole) == cloud_name:
+                self.on_tree_current_item_changed(current, None)
+            
+            QMessageBox.information(
+                self,
+                'Успех',
+                f'Область интерполирована: добавлено {n_new} точек'
+            )
+                
+        except ImportError:
+            QMessageBox.critical(
+                self, 
+                'Ошибка', 
+                'Для интерполяции областей требуется библиотека scipy.\nУстановите её: pip install scipy'
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                'Ошибка', 
+                f'Не удалось интерполировать область: {str(e)}'
+            )
+
+    def on_click_remove_by_class(self):
+        """Удалить все точки текущего облака, принадлежащие выбранному классу из comboBox_remove."""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+            return
+        if not hasattr(self.ui, 'comboBox_remove'):
+            QMessageBox.information(self, 'Инфо', 'comboBox_remove не найден')
+            return
+        poly = cloud.get('poly_data')
+        if poly is None:
+            QMessageBox.information(self, 'Инфо', 'Нет данных облака')
+            return
+        # Определяем поле классов: predict предпочтительно, иначе label
+        field = 'predict' if 'predict' in poly.array_names else ('label' if 'label' in poly.array_names else None)
+        if field is None:
+            QMessageBox.information(self, 'Инфо', 'Нет данных классов (predict/label) для удаления')
+            return
+
+        cls_id = self.ui.comboBox_remove.currentData()
+        if cls_id is None:
+            QMessageBox.information(self, 'Инфо', 'Класс не выбран')
+            return
+        try:
+            import numpy as np
+            preds = np.asarray(poly[field]).reshape(-1)
+            if preds.size == 0:
+                QMessageBox.information(self, 'Инфо', 'Нет точек для удаления')
+                return
+
+            # Маска точек, которые нужно оставить (все, кроме выбранного класса)
+            keep_mask = preds != int(cls_id)
+            if not np.any(keep_mask):
+                QMessageBox.warning(self, 'Предупреждение', 'Удаление всех точек приведет к пустому облаку')
+                return
+
+            new_poly_data = poly.extract_points(keep_mask, include_cells=False)
+            if len(new_poly_data.points) == 0:
+                QMessageBox.warning(self, 'Предупреждение', 'После удаления облако пусто')
+                return
+
+            # Обновляем Open3D объект
+            new_points = np.asarray(new_poly_data.points)
+            cloud['pcd'].points = o3d.utility.Vector3dVector(new_points)
+
+            # Перенесём при наличии — цвета/скаляры (polydata уже содержит нужные массивы)
+            cloud['poly_data'] = new_poly_data
+
+            # Очистим выделение
+            cloud['selected_indices'] = set()
+            if cloud.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud['selection_actor'])
+                except Exception:
+                    pass
+                cloud['selection_actor'] = None
+
+            # Применим текущий режим окраски и обновим комбобоксы классов
+            mode = cloud.get('color_mode', 'height')
+            self.apply_point_color_mode(cloud_name, mode)
+            self._populate_class_combos(cloud_name)
+
+            # Обновим панель информации
+            current_item = self.ui.treeWidget.currentItem()
+            if current_item and current_item.data(0, Qt.UserRole) == cloud_name:
+                self.on_tree_current_item_changed(current_item, None)
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось удалить точки по классу: {str(e)}')
+
+    def update_status_bar(self):
+        """Обновить статусбар с информацией о текущем режиме"""
+        if self.brush_mode:
+            self.statusBar().showMessage(
+                f"Режим кисти: радиус {self.brush_radius:.3f} (размер {self.brush_size}) | Кнопки [+]/[−] для изменения размера | Alt+ПКМ для снятия выделения"
+            )
+        elif self.selection_mode:
+            self.statusBar().showMessage("Режим точечного выделения | ПКМ для выделения/снятия выделения точек")
+        else:
+            self.statusBar().clearMessage()
+
+    def _sync_brush_radius(self):
+        """Синхронизировать внутренний радиус кисти с целочисленным размером 1..20.
+        """
+        try:
+            size = int(self.brush_size)
+        except Exception:
+            size = 10
+        size = max(1, min(20, size))
+        self.brush_size = size
+        self.brush_radius = float(size)
+
+    def on_toggle_brush_select(self, checked):
+        """Вкл/Выкл режима выделения кистью"""
+        self.brush_mode = bool(checked)
+        
+        # Взаимное исключение режимов
+        if self.brush_mode and self.selection_mode:
+            self.selection_mode = False
+            self.ui.pushButton_point.setChecked(False)
+        
+        try:
+            if self.brush_mode:
+                # Отключаем любой предыдущий picking перед включением нового
+                try:
+                    if hasattr(self.plotter, 'disable_picking'):
+                        self.plotter.disable_picking()
+                except Exception:
+                    pass
+                
+                # Сохраняем текущую позицию камеры
+                saved_camera_pos = self.plotter.camera_position
+                
+                # Включаем point picking для кисти
+                try:
+                    self.plotter.enable_point_picking(
+                        callback=self.on_brush_pick,
+                        left_clicking=False,
+                        show_message=False,
+                        show_point=False,
+                        color='white',
+                        opacity=0.0
+                    )
+                except Exception:
+                    pass
+                
+                # Восстанавливаем позицию камеры
+                self.plotter.camera_position = saved_camera_pos
+                self.plotter.render()
+                
+                # Устанавливаем фокус на главное окно для обработки клавиш +/-
+                self.setFocus()
+            else:
+                # Отключаем picking
+                try:
+                    if hasattr(self.plotter, 'disable_picking'):
+                        self.plotter.disable_picking()
+                except Exception:
+                    pass
+                
+                # Очистка внутреннего выделения PyVista
+                try:
+                    if hasattr(self.plotter, 'picker'):
+                        self.plotter.picker = None
+                    self.plotter.render()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        self.update_status_bar()
+
+    def on_brush_pick(self, picked_point):
+        """Правый клик: выделение кистью с радиусом"""
+        try:
+            # Проверяем, что режим кисти включен
+            if not self.brush_mode:
+                return
+            
+            # Сохраняем текущее состояние камеры
+            camera_pos = self.plotter.camera_position
+            
+            current = self.ui.treeWidget.currentItem()
+            if current is None:
+                return
+            cloud_name = current.data(0, Qt.UserRole)
+            if cloud_name not in self.point_clouds:
+                return
+            
+            cloud = self.point_clouds[cloud_name]
+            pts = np.asarray(cloud['poly_data'].points)
+            if pts.size == 0:
+                return
+            
+            # Определяем режим: выделение или снятие выделения
+            from PyQt5.QtWidgets import QApplication
+            modifiers = QApplication.keyboardModifiers()
+            is_removing = bool(modifiers & Qt.AltModifier)
+            
+            # Найдем все точки в радиусе от места клика
+            p = np.asarray(picked_point, dtype=float).reshape(1, 3)
+            distances = np.linalg.norm(pts - p, axis=1)
+            indices_in_radius = np.where(distances <= self.brush_radius)[0]
+            
+            # Получаем текущее выделение
+            sel = cloud.get('selected_indices', set())
+            
+            if is_removing:
+                # Alt + ПКМ: снимаем выделение с точек в радиусе
+                for idx in indices_in_radius:
+                    sel.discard(int(idx))
+            else:
+                # ПКМ: выделяем точки в радиусе
+                for idx in indices_in_radius:
+                    sel.add(int(idx))
+            
+            cloud['selected_indices'] = sel
+            
+            # Обновляем визуальный оверлей
+            self.update_selection_overlay(cloud_name)
+            
+            # Восстанавливаем позицию камеры
+            self.plotter.camera_position = camera_pos
+            
+        except Exception:
+            pass
+
+    def keyPressEvent(self, event):
+        """Обработка нажатий клавиш"""
+        # Больше не изменяем размер кисти по клавишам +/- — используем кнопки UI
+        super().keyPressEvent(event)
+
+    def on_brush_size_inc(self):
+        """Увеличить размер кисти кнопкой [+] (1..20)."""
+        try:
+            self.brush_size = min(int(self.brush_size) + 1, 20)
+            self._sync_brush_radius()
+            self.update_status_bar()
+        except Exception:
+            pass
+
+    def on_brush_size_dec(self):
+        """Уменьшить размер кисти кнопкой [−] (1..20)."""
+        try:
+            self.brush_size = max(int(self.brush_size) - 1, 1)
+            self._sync_brush_radius()
+            self.update_status_bar()
+        except Exception:
+            pass
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    
+    # Создаем и показываем основное окно
+    window = PCDViewer()
+    window.show()
+    
+    sys.exit(app.exec_())

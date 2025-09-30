@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and cache
+logs/
+cache/
+*.log
+
+# User data
+user_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ignore all files in data/ except specific ones
+data/*
+!data/points_tile_i0013_j0006.pcd
+!data/points_tile_i0025_j0008.pcd

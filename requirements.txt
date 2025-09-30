@@ -1,0 +1,36 @@
+# ТРЕБУЕТСЯ: Python 3.10.8
+# Проверьте версию: python --version
+
+# Основные зависимости для UI
+PyQt5>=5.15.0
+pyvista>=0.38.0
+pyvistaqt>=0.11.0
+
+# Open3D и Open3D-ML
+open3d>=0.17.0
+
+# Open3D-ML (устанавливается из GitHub, т.к. не в PyPI)
+# Требуется для RandLA-Net и семантической сегментации
+git+https://github.com/isl-org/Open3D-ML.git
+
+# Зависимости Open3D-ML
+addict
+pillow>=9.3.0
+matplotlib>=3.0.0
+numpy>=1.19.0,<2.0.0
+pandas>=1.0.0
+pyyaml>=5.4.1
+scikit-learn>=0.21.0
+tqdm
+pyquaternion
+tensorboard>=2.0.0
+
+# Зависимости для PyTorch (CUDA)
+# ВАЖНО: Open3D-ML требует PyTorch 2.2.*
+# НЕ устанавливайте более новые версии!
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
+
+# Дополнительные зависимости
+scipy>=1.7.0
