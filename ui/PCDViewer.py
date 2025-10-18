@@ -117,6 +117,9 @@ class PCDViewer(QMainWindow):
         if hasattr(self.ui, 'pushButton_brush_2'):
             self.ui.pushButton_brush_2.clicked.connect(self.on_brush_size_dec)
 
+        # Тултипы для всех кнопок UI
+        self._setup_tooltips()
+
         # Сопоставление индексов комбобокса режимам окраски и обратно
         self.mode_by_index = {
             0: 'height',        # Градиент по высоте
@@ -164,6 +167,69 @@ class PCDViewer(QMainWindow):
         
         # Устанавливаем фокус на главное окно для обработки клавиш
         self.setFocusPolicy(Qt.StrongFocus)
+
+    def _setup_tooltips(self):
+        """Установить подсказки (tooltips) для всех кнопок UI."""
+        try:
+            # Импорт/Экспорт
+            if hasattr(self.ui, 'pushButton_import'):
+                self.ui.pushButton_import.setToolTip('Импортировать облако(а) точек из файла')
+            if hasattr(self.ui, 'pushButton_export'):
+                self.ui.pushButton_export.setToolTip('Экспортировать текущее облако точек в .pcd')
+
+            # Анализ и классы
+            if hasattr(self.ui, 'pushButton_analys_net'):
+                self.ui.pushButton_analys_net.setToolTip('Запустить сегментацию: выбрать модель и выполнить анализ')
+            if hasattr(self.ui, 'pushButton_transform'):
+                self.ui.pushButton_transform.setToolTip('Сменить класс у выделенных точек')
+            if hasattr(self.ui, 'pushButton_remove'):
+                self.ui.pushButton_remove.setToolTip('Удалить все точки выбранного класса')
+
+            # Выделение и правки
+            if hasattr(self.ui, 'pushButton_interpolate'):
+                self.ui.pushButton_interpolate.setToolTip('Интерполяция области по выделенным граничным точкам')
+            if hasattr(self.ui, 'pushButton_reset_point'):
+                self.ui.pushButton_reset_point.setToolTip('Сбросить текущее выделение точек')
+            if hasattr(self.ui, 'pushButton_remove_point'):
+                self.ui.pushButton_remove_point.setToolTip('Удалить выделенные точки')
+
+            # Тайлы и сравнение
+            if hasattr(self.ui, 'pushButton_crop_tile'):
+                self.ui.pushButton_crop_tile.setToolTip('Разбить облако на тайлы (размер и перекрытие)')
+            if hasattr(self.ui, 'pushButton_compare'):
+                self.ui.pushButton_compare.setToolTip('Сравнить два облака точек (тепловая карта/различия/статистика)')
+
+            # Режимы выделения
+            if hasattr(self.ui, 'pushButton_point'):
+                self.ui.pushButton_point.setToolTip('Режим: выбор точек по щелчку (ПКМ)')
+            if hasattr(self.ui, 'pushButton_brush'):
+                self.ui.pushButton_brush.setToolTip('Режим: выделение кистью (ПКМ), Alt+ПКМ — снятие')
+            if hasattr(self.ui, 'pushButton_brush_1'):
+                self.ui.pushButton_brush_1.setToolTip('Увеличить размер кисти')
+            if hasattr(self.ui, 'pushButton_brush_2'):
+                self.ui.pushButton_brush_2.setToolTip('Уменьшить размер кисти')
+
+            # Виды и масштаб
+            if hasattr(self.ui, 'pushButton_zoom_up'):
+                self.ui.pushButton_zoom_up.setToolTip('Увеличить масштаб')
+            if hasattr(self.ui, 'pushButton_zoom_down'):
+                self.ui.pushButton_zoom_down.setToolTip('Уменьшить масштаб')
+            if hasattr(self.ui, 'pushButton_reset_view'):
+                self.ui.pushButton_reset_view.setToolTip('Показать всю сцену (сброс вида)')
+            if hasattr(self.ui, 'pushButton_front'):
+                self.ui.pushButton_front.setToolTip('Вид спереди')
+            if hasattr(self.ui, 'pushButton_back'):
+                self.ui.pushButton_back.setToolTip('Вид сзади')
+            if hasattr(self.ui, 'pushButton_left'):
+                self.ui.pushButton_left.setToolTip('Вид слева')
+            if hasattr(self.ui, 'pushButton_right'):
+                self.ui.pushButton_right.setToolTip('Вид справа')
+            if hasattr(self.ui, 'pushButton_top'):
+                self.ui.pushButton_top.setToolTip('Вид сверху')
+            if hasattr(self.ui, 'pushButton_bottom'):
+                self.ui.pushButton_bottom.setToolTip('Вид снизу')
+        except Exception:
+            pass
         
     def _get_selected_cfg_name(self, cfg_name=None):
         """Вернуть нормализованное имя конфига."""

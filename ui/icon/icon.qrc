@@ -1,11 +1,5 @@
 <RCC>
   <qresource prefix="icon">
-    <file>1.svg</file>
-    <file>2.svg</file>
-    <file>3.svg</file>
-    <file>4.svg</file>
-    <file>5.svg</file>
-    <file>6.svg</file>
     <file>Group 1000011070.svg</file>
     <file>Group 1000011071.svg</file>
     <file>Group 1000011072.svg</file>
@@ -14,14 +8,20 @@
     <file>Group 1000011075.svg</file>
     <file>Group 1000011076.svg</file>
     <file>Group 1000011077.svg</file>
-    <file>Group 1000011078.svg</file>
-    <file>Group 1000011079.svg</file>
-    <file>Group 1000011080.svg</file>
+    <file>Group 1000011081.svg</file>
+    <file>Group 1000011082.svg</file>
+    <file>Group 1000011083.svg</file>
+    <file>Group 1000011084.svg</file>
+    <file>Group 1000011085.svg</file>
+    <file>Group 1000011086.svg</file>
+    <file>Group 1000011087.svg</file>
+    <file>Group 1000011088.svg</file>
+    <file>Group 1000011089.svg</file>
+    <file>Group 1000011090.svg</file>
+    <file>Group 1000011091.svg</file>
+    <file>Group 1000011092.svg</file>
+    <file>Group 1000011093.svg</file>
     <file>Shape.svg</file>
     <file>Shape-1.svg</file>
-    <file>Shape-2.svg</file>
-    <file>Shape-3.svg</file>
-    <file>Shape-4.svg</file>
-    <file>Shape-5.svg</file>
   </qresource>
 </RCC>

@@ -111,37 +111,86 @@ QPushButton:pressed{
           <enum>QFrame::Plain</enum>
          </property>
          <layout class="QHBoxLayout" name="horizontalLayout_2">
+          <property name="spacing">
+           <number>5</number>
+          </property>
+          <property name="leftMargin">
+           <number>5</number>
+          </property>
+          <property name="topMargin">
+           <number>5</number>
+          </property>
+          <property name="rightMargin">
+           <number>5</number>
+          </property>
+          <property name="bottomMargin">
+           <number>5</number>
+          </property>
           <item>
            <widget class="QPushButton" name="pushButton_point">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>60</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton:checked {
+	background-color: rgb(192, 191, 188);
+}</string>
             </property>
             <property name="text">
              <string/>
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Group 1000011078.svg</normaloff>:/icon/Group 1000011078.svg</iconset>
+              <normaloff>:/icon/Group 1000011081.svg</normaloff>:/icon/Group 1000011081.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_brush">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>60</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton:checked {
+	background-color: rgb(192, 191, 188);
+}</string>
             </property>
             <property name="text">
              <string/>
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Group 1000011079.svg</normaloff>:/icon/Group 1000011079.svg</iconset>
+              <normaloff>:/icon/Group 1000011082.svg</normaloff>:/icon/Group 1000011082.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
@@ -182,7 +231,7 @@ QPushButton:pressed{
                </property>
                <property name="icon">
                 <iconset resource="icon/icon.qrc">
-                 <normaloff>:/icon/Shape-2.svg</normaloff>:/icon/Shape-2.svg</iconset>
+                 <normaloff>:/icon/Shape-1.svg</normaloff>:/icon/Shape-1.svg</iconset>
                </property>
                <property name="iconSize">
                 <size>
@@ -205,7 +254,7 @@ QPushButton:pressed{
                </property>
                <property name="icon">
                 <iconset resource="icon/icon.qrc">
-                 <normaloff>:/icon/Shape-1.svg</normaloff>:/icon/Shape-1.svg</iconset>
+                 <normaloff>:/icon/Shape.svg</normaloff>:/icon/Shape.svg</iconset>
                </property>
                <property name="iconSize">
                 <size>
@@ -220,26 +269,49 @@ QPushButton:pressed{
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_reset_point">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>60</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton{
+margin-left: 5px
+}</string>
             </property>
             <property name="text">
              <string/>
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Shape.svg</normaloff>:/icon/Shape.svg</iconset>
+              <normaloff>:/icon/Group 1000011084.svg</normaloff>:/icon/Group 1000011084.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_remove_point">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>60</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -248,12 +320,21 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Group 1000011080.svg</normaloff>:/icon/Group 1000011080.svg</iconset>
+              <normaloff>:/icon/Group 1000011083.svg</normaloff>:/icon/Group 1000011083.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="Line" name="line">
+            <property name="styleSheet">
+             <string notr="true">background-color: rgb(192, 191, 188);</string>
+            </property>
             <property name="orientation">
              <enum>Qt::Vertical</enum>
             </property>
@@ -261,9 +342,15 @@ QPushButton:pressed{
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_zoom_up">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -272,15 +359,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Shape-3.svg</normaloff>:/icon/Shape-3.svg</iconset>
+              <normaloff>:/icon/Group 1000011085.svg</normaloff>:/icon/Group 1000011085.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_zoom_down">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -289,15 +388,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Shape-4.svg</normaloff>:/icon/Shape-4.svg</iconset>
+              <normaloff>:/icon/Group 1000011086.svg</normaloff>:/icon/Group 1000011086.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_reset_view">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -306,12 +417,21 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/Shape-5.svg</normaloff>:/icon/Shape-5.svg</iconset>
+              <normaloff>:/icon/Group 1000011087.svg</normaloff>:/icon/Group 1000011087.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="Line" name="line_2">
+            <property name="styleSheet">
+             <string notr="true">background-color: rgb(192, 191, 188);</string>
+            </property>
             <property name="orientation">
              <enum>Qt::Vertical</enum>
             </property>
@@ -319,9 +439,15 @@ QPushButton:pressed{
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_front">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -330,15 +456,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/1.svg</normaloff>:/icon/1.svg</iconset>
+              <normaloff>:/icon/Group 1000011088.svg</normaloff>:/icon/Group 1000011088.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_back">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -347,15 +485,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/6.svg</normaloff>:/icon/6.svg</iconset>
+              <normaloff>:/icon/Group 1000011091.svg</normaloff>:/icon/Group 1000011091.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_left">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -364,15 +514,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/5.svg</normaloff>:/icon/5.svg</iconset>
+              <normaloff>:/icon/Group 1000011093.svg</normaloff>:/icon/Group 1000011093.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_right">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -381,15 +543,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/3.svg</normaloff>:/icon/3.svg</iconset>
+              <normaloff>:/icon/Group 1000011090.svg</normaloff>:/icon/Group 1000011090.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_top">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -398,15 +572,27 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/2.svg</normaloff>:/icon/2.svg</iconset>
+              <normaloff>:/icon/Group 1000011089.svg</normaloff>:/icon/Group 1000011089.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="pushButton_bottom">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="maximumSize">
              <size>
-              <width>50</width>
+              <width>16777215</width>
               <height>16777215</height>
              </size>
             </property>
@@ -415,7 +601,13 @@ QPushButton:pressed{
             </property>
             <property name="icon">
              <iconset resource="icon/icon.qrc">
-              <normaloff>:/icon/4.svg</normaloff>:/icon/4.svg</iconset>
+              <normaloff>:/icon/Group 1000011092.svg</normaloff>:/icon/Group 1000011092.svg</iconset>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>30</width>
+              <height>30</height>
+             </size>
             </property>
            </widget>
           </item>
@@ -599,7 +791,10 @@ border-radius: 10px;
     </sizepolicy>
    </property>
    <property name="styleSheet">
-    <string notr="true"/>
+    <string notr="true">QFrame {
+	background-color: rgb(230, 230, 230);
+border-radius: 10px;
+}</string>
    </property>
    <property name="features">
     <set>QDockWidget::NoDockWidgetFeatures</set>
@@ -635,6 +830,9 @@ border-radius: 10px;
        <layout class="QVBoxLayout" name="verticalLayout_8">
         <item>
          <widget class="QTabWidget" name="tabWidget">
+          <property name="tabShape">
+           <enum>QTabWidget::Rounded</enum>
+          </property>
           <property name="currentIndex">
            <number>0</number>
           </property>
@@ -928,8 +1126,11 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_8">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
+          </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
           </property>
           <property name="text">
            <string>Сравнить</string>
@@ -963,11 +1164,14 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_4">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
           </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
+          </property>
           <property name="text">
-           <string>Преобраз</string>
+           <string>Сменить</string>
           </property>
           <property name="scaledContents">
            <bool>false</bool>
@@ -1015,8 +1219,11 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_3">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
+          </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
           </property>
           <property name="text">
            <string>Анализ</string>
@@ -1033,8 +1240,11 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_5">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
+          </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
           </property>
           <property name="text">
            <string>Удалить</string>
@@ -1051,8 +1261,11 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_7">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
+          </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
           </property>
           <property name="text">
            <string>Экспорт</string>
@@ -1067,6 +1280,12 @@ QPushButton:pressed{
         </item>
         <item row="0" column="0">
          <widget class="QPushButton" name="pushButton_import">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
           <property name="text">
            <string/>
           </property>
@@ -1086,11 +1305,14 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_6">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
           </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
+          </property>
           <property name="text">
-           <string>Интерпол</string>
+           <string>Заполнить</string>
           </property>
           <property name="scaledContents">
            <bool>false</bool>
@@ -1172,8 +1394,11 @@ QPushButton:pressed{
          <widget class="QLabel" name="label">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
+          </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
           </property>
           <property name="text">
            <string>Импорт</string>
@@ -1190,11 +1415,14 @@ QPushButton:pressed{
          <widget class="QLabel" name="label_2">
           <property name="font">
            <font>
-            <pointsize>12</pointsize>
+            <pointsize>11</pointsize>
            </font>
           </property>
+          <property name="toolTipDuration">
+           <number>-1</number>
+          </property>
           <property name="text">
-           <string>Разделить</string>
+           <string>Тайлы</string>
           </property>
           <property name="scaledContents">
            <bool>false</bool>
