@@ -1,0 +1,13 @@
+<svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+<line x1="17.7476" y1="42.0324" x2="40.7476" y2="36.0324" stroke="#404040" stroke-width="2"/>
+<line x1="17.4056" y1="42.1958" x2="40.4056" y2="25.1958" stroke="#404040" stroke-width="2"/>
+<line x1="17.7876" y1="30.0228" x2="40.7876" y2="25.0228" stroke="#404040" stroke-width="2"/>
+<line x1="18.2912" y1="18.0433" x2="41.2912" y2="25.0433" stroke="#404040" stroke-width="2"/>
+<line x1="18.6163" y1="18.2125" x2="41.6163" y2="36.2125" stroke="#404040" stroke-width="2"/>
+<line x1="18.2524" y1="30.0324" x2="41.2524" y2="36.0324" stroke="#404040" stroke-width="2"/>
+<rect x="14" y="38" width="8" height="8" rx="4" fill="#EDEDED"/>
+<rect x="14" y="14" width="8" height="8" rx="4" fill="#EDEDED"/>
+<rect x="37" y="32" width="8" height="8" rx="4" fill="#EDEDED"/>
+<rect x="37" y="21" width="8" height="8" rx="4" fill="#EDEDED"/>
+<rect x="14" y="26" width="8" height="8" rx="4" fill="#EDEDED"/>
+</svg>

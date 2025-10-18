@@ -30,6 +30,9 @@ class PCDViewer(QMainWindow):
         self.ui.pushButton_analys_net.clicked.connect(self.on_click_analyze_net)
         self.ui.pushButton_remove.clicked.connect(self.on_click_remove_by_class)
         self.ui.pushButton_export.clicked.connect(self.on_click_export)
+        self.ui.pushButton_interpolate.clicked.connect(self.on_click_interpolate)
+        self.ui.pushButton_reset_point.clicked.connect(self.on_click_reset_point)
+        self.ui.pushButton_remove_point.clicked.connect(self.on_click_remove_point)
         self.ui.treeWidget.itemChanged.connect(self.on_tree_item_changed)
         self.ui.treeWidget.currentItemChanged.connect(self.on_tree_current_item_changed)
         
@@ -152,24 +155,27 @@ class PCDViewer(QMainWindow):
         # Устанавливаем фокус на главное окно для обработки клавиш
         self.setFocusPolicy(Qt.StrongFocus)
         
-    def _get_selected_cfg_name(self):
-        """Вернуть нормализованное имя конфига по comboBox_analys_net."""
-        try:
-            text = self.ui.comboBox_analys_net.currentText()
-        except Exception:
-            text = ''
-        name = str(text).strip().lower()
-        if 'toronto' in name:
-            return 'randlanet_toronto3d'
-        if 'kitti' in name or 'semantik' in name or 'semantic' in name:
-            return 'randlanet_semantickitti'
-        if name.startswith('randla-net') or name.startswith('randlanet'):
+    def _get_selected_cfg_name(self, cfg_name=None):
+        """Вернуть нормализованное имя конфига."""
+        if cfg_name is None:
+            try:
+                text = self.ui.comboBox_analys_net.currentText()
+            except Exception:
+                text = ''
+            name = str(text).strip().lower()
+            if 'toronto' in name:
+                return 'randlanet_toronto3d'
+            if 'kitti' in name or 'semantik' in name or 'semantic' in name:
+                return 'randlanet_semantickitti'
+            if name.startswith('randla-net') or name.startswith('randlanet'):
+                return 'randlanet'
             return 'randlanet'
-        return 'randlanet'
+        return cfg_name
 
-    def _ensure_ml_pipeline(self):
-        """Ленивая инициализация пайплайна по выбранному конфигу из comboBox."""
-        cfg_name = self._get_selected_cfg_name()
+    def _ensure_ml_pipeline(self, cfg_name=None):
+        """Ленивая инициализация пайплайна по указанному конфигу."""
+        if cfg_name is None:
+            cfg_name = self._get_selected_cfg_name()
         if cfg_name in self._ml_pipelines:
             self._ml_pipeline = self._ml_pipelines[cfg_name]
             return
@@ -341,7 +347,7 @@ class PCDViewer(QMainWindow):
             pass
 
     def on_click_analyze_net(self):
-        """Обработчик кнопки анализа: инференс по текущему облаку и показ predict."""
+        """Обработчик кнопки анализа: открывает диалог выбора нейросети."""
         current = self.ui.treeWidget.currentItem()
         if current is None:
             QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
@@ -351,13 +357,60 @@ class PCDViewer(QMainWindow):
             QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
             return
 
+        # Диалог выбора нейросети
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Выбор нейросети для анализа')
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Метка
+        label = QLabel('Выберите нейросеть для сегментации:')
+        dialog_layout.addWidget(label)
+        
+        # Список нейросетей
+        networks_list = QListWidget()
+        networks = [
+            ('RandLA-Net (Hack2C)', 'randlanet'),
+            ('RandLA-Net (Toronto3D)', 'randlanet_toronto3d'),
+            ('RandLA-Net (SemanticKITTI)', 'randlanet_semantickitti')
+        ]
+        for name, cfg in networks:
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, cfg)
+            networks_list.addItem(item)
+        networks_list.setCurrentRow(0)
+        dialog_layout.addWidget(networks_list)
+        
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('Запустить анализ')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        # Получаем выбранную конфигурацию
+        selected_item = networks_list.currentItem()
+        if selected_item is None:
+            return
+        cfg_name = selected_item.data(Qt.UserRole)
+        
+        # Запускаем инференс с выбранной конфигурацией
+        self._run_inference(cloud_name, cfg_name)
+
+    def _run_inference(self, cloud_name, cfg_name):
+        """Запустить инференс на облаке с указанной конфигурацией."""
         btn = self.ui.pushButton_analys_net if hasattr(self.ui, 'pushButton_analys_net') else None
         if btn is not None:
             btn.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             # 1) Инициализируем/берем pipeline
-            self._ensure_ml_pipeline()
+            self._ensure_ml_pipeline(cfg_name)
             # 2) Достаём точки текущего облака
             cloud = self.point_clouds[cloud_name]
             poly = cloud['poly_data']
@@ -372,7 +425,7 @@ class PCDViewer(QMainWindow):
                 return
             # 4) Кладём предсказания в poly_data и применяем режим
             cloud['poly_data']['predict'] = pred
-            cloud['predict_cfg'] = self._get_selected_cfg_name()
+            cloud['predict_cfg'] = cfg_name
             cloud['color_mode'] = 'predict'
             self.apply_point_color_mode(cloud_name, 'predict')
             # После инференса заполняем трансформ и remove классами выбранной нейросети
@@ -457,6 +510,34 @@ class PCDViewer(QMainWindow):
             QMessageBox.information(self, 'Экспорт', f'Сохранено: {out_path}')
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка экспорта', f'Не удалось сохранить PCD: {str(e)}')
+
+    def on_click_interpolate(self):
+        """Интерполировать область по выделенным точкам текущего облака"""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name in self.point_clouds:
+            self.fill_hole(cloud_name)
+
+    def on_click_reset_point(self):
+        """Сбросить выделение точек текущего облака"""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name in self.point_clouds:
+            self.clear_selection(cloud_name)
+
+    def on_click_remove_point(self):
+        """Удалить выделенные точки текущего облака"""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        if cloud_name in self.point_clouds:
+            self.delete_selected_points(cloud_name)
     
     def setup_pyvista_widget(self):
         """Настройка PyVista виджета в frame_view"""
@@ -729,34 +810,99 @@ class PCDViewer(QMainWindow):
             pass
 
     def on_click_transform(self):
-        """Преобразовать выделенные точки в выбранный класс из comboBox_transform."""
+        """Открыть диалог выбора класса для преобразования выделенных точек."""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        cloud_name = current.data(0, Qt.UserRole)
+        cloud = self.point_clouds.get(cloud_name)
+        if not cloud:
+            QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+            return
+
+        poly = cloud.get('poly_data')
+        if poly is None or len(poly.points) == 0:
+            QMessageBox.information(self, 'Инфо', 'Нет данных точек для преобразования')
+            return
+
+        sel = cloud.get('selected_indices', set())
+        if not sel:
+            QMessageBox.information(self, 'Инфо', 'Нет выделенных точек для преобразования')
+            return
+
+        # Определяем доступные классы
+        class_ids = []
+        if 'predict' in poly.array_names:
+            class_ids = np.unique(np.asarray(poly['predict']).reshape(-1)).tolist()
+        elif 'label' in poly.array_names:
+            class_ids = np.unique(np.asarray(poly['label']).reshape(-1)).tolist()
+        else:
+            QMessageBox.information(self, 'Инфо', 'Нет данных классов для преобразования')
+            return
+
+        # Получаем конфигурацию и имена классов
+        cfg_name = cloud.get('predict_cfg') if isinstance(cloud.get('predict_cfg'), str) else 'randlanet'
+        names, colors = self._get_class_names_and_colors(cfg_name)
+
+        # Диалог выбора класса
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Выбор класса для преобразования')
+        dialog_layout = QVBoxLayout(dialog)
+
+        # Метка
+        label = QLabel(f'Выберите класс для {len(sel)} выделенных точек:')
+        dialog_layout.addWidget(label)
+
+        # Список классов
+        classes_list = QListWidget()
+        for cls_id in class_ids:
+            cls_int = int(cls_id)
+            title = names[cls_int] if 0 <= cls_int < len(names) else f"Class {cls_int}"
+            color = colors[cls_int % len(colors)] if colors else (200, 200, 200)
+            
+            item = QListWidgetItem(title)
+            item.setData(Qt.UserRole, cls_int)
+            # Устанавливаем цвет фона для визуализации
+            qcolor = QColor(color[0], color[1], color[2])
+            item.setBackground(QBrush(qcolor))
+            classes_list.addItem(item)
+        
+        classes_list.setCurrentRow(0)
+        dialog_layout.addWidget(classes_list)
+
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('Преобразовать')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        # Получаем выбранный класс
+        selected_item = classes_list.currentItem()
+        if selected_item is None:
+            return
+        target_cls = selected_item.data(Qt.UserRole)
+
+        # Выполняем преобразование
+        self._transform_points_to_class(cloud_name, target_cls)
+
+    def _transform_points_to_class(self, cloud_name, target_cls):
+        """Преобразовать выделенные точки облака в указанный класс."""
         try:
-            current = self.ui.treeWidget.currentItem()
-            if current is None:
-                QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
-                return
-            cloud_name = current.data(0, Qt.UserRole)
             cloud = self.point_clouds.get(cloud_name)
             if not cloud:
-                QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
-                return
-            if not hasattr(self.ui, 'comboBox_transform'):
-                QMessageBox.information(self, 'Инфо', 'comboBox_transform не найден')
-                return
-
-            target_cls = self.ui.comboBox_transform.currentData()
-            if target_cls is None:
-                QMessageBox.information(self, 'Инфо', 'Класс для преобразования не выбран')
                 return
 
             poly = cloud.get('poly_data')
-            if poly is None or len(poly.points) == 0:
-                QMessageBox.information(self, 'Инфо', 'Нет данных точек для преобразования')
-                return
-
             sel = cloud.get('selected_indices', set())
-            if not sel:
-                QMessageBox.information(self, 'Инфо', 'Нет выделенных точек для преобразования')
+            if not sel or poly is None:
                 return
 
             indices = np.array(sorted(list(sel)), dtype=int)
@@ -783,10 +929,12 @@ class PCDViewer(QMainWindow):
             if mode in ('predict', 'label') and updated_field in ('predict', 'label'):
                 self.apply_point_color_mode(cloud_name, mode)
 
-            # Обновим списки классов и оверлей
+            # Обновим списки классов
             self._populate_class_combos(cloud_name)
             self._populate_transform_combo(cloud_name)
-            self.update_selection_overlay(cloud_name)
+            
+            # Сбрасываем выделение после преобразования
+            self.clear_selection(cloud_name)
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка', f'Не удалось преобразовать точки: {str(e)}')
 
@@ -946,7 +1094,7 @@ class PCDViewer(QMainWindow):
             try:
                 # Построим кастомный colormap на основе фиксированных RGB
                 import matplotlib.colors as mcolors
-                cfg_name = self._get_selected_cfg_name()
+                cfg_name = cloud_data.get('predict_cfg') if isinstance(cloud_data.get('predict_cfg'), str) else 'randlanet'
                 names, colors = self._get_class_names_and_colors(cfg_name)
                 # colors в 0..255 -> 0..1
                 colors01 = [(r/255.0, g/255.0, b/255.0) for (r, g, b) in colors]
@@ -1604,7 +1752,7 @@ class PCDViewer(QMainWindow):
             )
 
     def on_click_remove_by_class(self):
-        """Удалить все точки текущего облака, принадлежащие выбранному классу из comboBox_remove."""
+        """Открыть диалог выбора класса для удаления всех точек этого класса."""
         current = self.ui.treeWidget.currentItem()
         if current is None:
             QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
@@ -1614,28 +1762,91 @@ class PCDViewer(QMainWindow):
         if not cloud:
             QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
             return
-        if not hasattr(self.ui, 'comboBox_remove'):
-            QMessageBox.information(self, 'Инфо', 'comboBox_remove не найден')
-            return
+
         poly = cloud.get('poly_data')
         if poly is None:
             QMessageBox.information(self, 'Инфо', 'Нет данных облака')
             return
+
         # Определяем поле классов: predict предпочтительно, иначе label
         field = 'predict' if 'predict' in poly.array_names else ('label' if 'label' in poly.array_names else None)
         if field is None:
             QMessageBox.information(self, 'Инфо', 'Нет данных классов (predict/label) для удаления')
             return
 
-        cls_id = self.ui.comboBox_remove.currentData()
-        if cls_id is None:
-            QMessageBox.information(self, 'Инфо', 'Класс не выбран')
+        # Получаем уникальные классы и их количество точек
+        preds = np.asarray(poly[field]).reshape(-1)
+        if preds.size == 0:
+            QMessageBox.information(self, 'Инфо', 'Нет точек для удаления')
             return
+
+        unique_classes, counts = np.unique(preds, return_counts=True)
+        
+        # Получаем конфигурацию и имена классов
+        cfg_name = cloud.get('predict_cfg') if isinstance(cloud.get('predict_cfg'), str) else 'randlanet'
+        names, colors = self._get_class_names_and_colors(cfg_name)
+
+        # Диалог выбора класса
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Удаление точек по классу')
+        dialog_layout = QVBoxLayout(dialog)
+
+        # Метка
+        label = QLabel('Выберите класс для удаления всех его точек:')
+        dialog_layout.addWidget(label)
+
+        # Список классов с количеством точек
+        classes_list = QListWidget()
+        for cls_id, count in zip(unique_classes, counts):
+            cls_int = int(cls_id)
+            title = names[cls_int] if 0 <= cls_int < len(names) else f"Class {cls_int}"
+            color = colors[cls_int % len(colors)] if colors else (200, 200, 200)
+            
+            item = QListWidgetItem(f"{title} ({count} точек)")
+            item.setData(Qt.UserRole, cls_int)
+            # Устанавливаем цвет фона для визуализации
+            qcolor = QColor(color[0], color[1], color[2])
+            item.setBackground(QBrush(qcolor))
+            classes_list.addItem(item)
+        
+        classes_list.setCurrentRow(0)
+        dialog_layout.addWidget(classes_list)
+
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('Удалить класс')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        # Получаем выбранный класс
+        selected_item = classes_list.currentItem()
+        if selected_item is None:
+            return
+        cls_id = selected_item.data(Qt.UserRole)
+
+        # Выполняем удаление
+        self._remove_points_by_class(cloud_name, cls_id, field)
+
+    def _remove_points_by_class(self, cloud_name, cls_id, field):
+        """Удалить все точки облака, принадлежащие указанному классу."""
         try:
-            import numpy as np
+            cloud = self.point_clouds.get(cloud_name)
+            if not cloud:
+                return
+
+            poly = cloud.get('poly_data')
+            if poly is None:
+                return
+
             preds = np.asarray(poly[field]).reshape(-1)
             if preds.size == 0:
-                QMessageBox.information(self, 'Инфо', 'Нет точек для удаления')
                 return
 
             # Маска точек, которые нужно оставить (все, кроме выбранного класса)
