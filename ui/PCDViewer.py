@@ -34,6 +34,7 @@ class PCDViewer(QMainWindow):
         self.ui.pushButton_reset_point.clicked.connect(self.on_click_reset_point)
         self.ui.pushButton_remove_point.clicked.connect(self.on_click_remove_point)
         self.ui.pushButton_crop_tile.clicked.connect(self.on_click_crop_tile)
+        self.ui.pushButton_compare.clicked.connect(self.on_click_compare)
         self.ui.treeWidget.itemChanged.connect(self.on_tree_item_changed)
         self.ui.treeWidget.currentItemChanged.connect(self.on_tree_current_item_changed)
         
@@ -71,6 +72,11 @@ class PCDViewer(QMainWindow):
         self.ui.comboBox_background_color.currentIndexChanged.connect(self.on_background_color_changed)
 
         # Переключение цвета точек
+        # Проверяем, нужно ли добавить пункт "Distance" (для облаков сравнения)
+        if self.ui.comboBox_point_color.count() < 10:
+            # Если пунктов меньше 10, значит "Distance" еще не добавлен
+            # Добавляем его на позицию 5 (после Predict)
+            self.ui.comboBox_point_color.insertItem(5, "Distance")
         self.ui.comboBox_point_color.currentIndexChanged.connect(self.on_point_color_changed)
 
         # Кнопка преобразования классов выделенных точек
@@ -118,10 +124,11 @@ class PCDViewer(QMainWindow):
             2: 'intensity',     # Интенсивность
             3: 'label',         # Label
             4: 'predict',       # Predict
-            5: 'white',         # Белый
-            6: 'black',         # Черный
-            7: 'blue',          # Синий
-            8: 'gray',          # Серый
+            5: 'distance',      # Distance (для сравнения облаков)
+            6: 'white',         # Белый
+            7: 'black',         # Черный
+            8: 'blue',          # Синий
+            9: 'gray',          # Серый
         }
         self.index_by_mode = {v: k for k, v in self.mode_by_index.items()}
         
@@ -541,6 +548,333 @@ class PCDViewer(QMainWindow):
         cloud_name = current.data(0, Qt.UserRole)
         if cloud_name in self.point_clouds:
             self.delete_selected_points(cloud_name)
+
+    def on_click_compare(self):
+        """Открыть диалог сравнения двух облаков точек."""
+        # Получаем список всех облаков (не групп)
+        available_clouds = []
+        for name, data in self.point_clouds.items():
+            if data.get('poly_data') is not None:
+                available_clouds.append(name)
+        
+        if len(available_clouds) < 2:
+            QMessageBox.information(
+                self,
+                'Инфо',
+                'Для сравнения необходимо минимум 2 облака точек'
+            )
+            return
+        
+        # Диалог выбора облаков и режима сравнения
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Сравнение облаков точек')
+        dialog.setMinimumWidth(400)
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Выбор исходного облака
+        source_layout = QHBoxLayout()
+        source_label = QLabel('Исходное облако:')
+        source_combo = QComboBox()
+        source_combo.addItems(available_clouds)
+        source_layout.addWidget(source_label)
+        source_layout.addWidget(source_combo)
+        dialog_layout.addLayout(source_layout)
+        
+        # Выбор сравниваемого облака
+        target_layout = QHBoxLayout()
+        target_label = QLabel('Сравнить с:')
+        target_combo = QComboBox()
+        target_combo.addItems(available_clouds)
+        if len(available_clouds) > 1:
+            target_combo.setCurrentIndex(1)
+        target_layout.addWidget(target_label)
+        target_layout.addWidget(target_combo)
+        dialog_layout.addLayout(target_layout)
+        
+        dialog_layout.addWidget(QLabel(''))  # Разделитель
+        
+        # Выбор режима сравнения
+        mode_group = QGroupBox('Режим сравнения')
+        mode_layout = QVBoxLayout()
+        
+        mode_heatmap = QRadioButton('Distance Heatmap (тепловая карта расстояний)')
+        mode_heatmap.setChecked(True)
+        mode_heatmap.setToolTip('Показать расстояния цветом: синий=совпадают, красный=удалены')
+        mode_layout.addWidget(mode_heatmap)
+        
+        mode_diff = QRadioButton('Show Differences (только различия)')
+        mode_diff.setToolTip('Показать только точки с расстоянием больше порога')
+        mode_layout.addWidget(mode_diff)
+        
+        mode_stats = QRadioButton('Statistics (статистика + карта)')
+        mode_stats.setToolTip('Показать метрики и тепловую карту')
+        mode_layout.addWidget(mode_stats)
+        
+        mode_group.setLayout(mode_layout)
+        dialog_layout.addWidget(mode_group)
+        
+        # Порог для режима различий
+        threshold_layout = QHBoxLayout()
+        threshold_label = QLabel('Порог различий (м):')
+        threshold_spinbox = QDoubleSpinBox()
+        threshold_spinbox.setRange(0.01, 10.0)
+        threshold_spinbox.setSingleStep(0.1)
+        threshold_spinbox.setValue(0.5)
+        threshold_spinbox.setDecimals(2)
+        threshold_layout.addWidget(threshold_label)
+        threshold_layout.addWidget(threshold_spinbox)
+        dialog_layout.addLayout(threshold_layout)
+        
+        # Тип colorbar
+        colorbar_group = QGroupBox('Тип colorbar')
+        colorbar_layout = QVBoxLayout()
+        
+        colorbar_gradient = QRadioButton('Gradient (плавный градиент)')
+        colorbar_gradient.setChecked(True)
+        colorbar_gradient.setToolTip('Синий → зеленый → желтый → красный (плавный переход)')
+        colorbar_layout.addWidget(colorbar_gradient)
+        
+        colorbar_binary = QRadioButton('Binary (два цвета по порогу)')
+        colorbar_binary.setToolTip('Синий (≤ порог) / Красный (> порог)')
+        colorbar_layout.addWidget(colorbar_binary)
+        
+        colorbar_group.setLayout(colorbar_layout)
+        dialog_layout.addWidget(colorbar_group)
+        
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('Сравнить')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        # Получаем выбранные параметры
+        source_name = source_combo.currentText()
+        target_name = target_combo.currentText()
+        threshold = threshold_spinbox.value()
+        
+        if source_name == target_name:
+            QMessageBox.warning(self, 'Предупреждение', 'Выберите разные облака для сравнения')
+            return
+        
+        # Определяем режим
+        if mode_heatmap.isChecked():
+            mode = 'heatmap'
+        elif mode_diff.isChecked():
+            mode = 'differences'
+        else:
+            mode = 'statistics'
+        
+        # Определяем тип colorbar
+        colorbar_type = 'binary' if colorbar_binary.isChecked() else 'gradient'
+        
+        # Выполняем сравнение
+        self._compare_clouds(source_name, target_name, mode, threshold, colorbar_type)
+
+    def _compare_clouds(self, source_name, target_name, mode, threshold, colorbar_type='gradient'):
+        """Выполнить сравнение двух облаков и визуализировать результат."""
+        try:
+            source_cloud = self.point_clouds.get(source_name)
+            target_cloud = self.point_clouds.get(target_name)
+            
+            if not source_cloud or not target_cloud:
+                QMessageBox.warning(self, 'Ошибка', 'Облака не найдены')
+                return
+            
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            
+            # Получаем Open3D объекты
+            source_pcd = source_cloud['pcd']
+            target_pcd = target_cloud['pcd']
+            
+            # Вычисляем расстояния от исходного до целевого
+            distances = np.asarray(source_pcd.compute_point_cloud_distance(target_pcd))
+            
+            # Статистика
+            mean_dist = np.mean(distances)
+            max_dist = np.max(distances)
+            min_dist = np.min(distances)
+            median_dist = np.median(distances)
+            points_above_threshold = np.sum(distances > threshold)
+            
+            if mode == 'statistics':
+                # Показываем статистику
+                stats_text = (
+                    f'Сравнение: {source_name} → {target_name}\n\n'
+                    f'Всего точек: {len(distances)}\n'
+                    f'Среднее расстояние: {mean_dist:.4f} м\n'
+                    f'Медианное расстояние: {median_dist:.4f} м\n'
+                    f'Минимальное расстояние: {min_dist:.4f} м\n'
+                    f'Максимальное расстояние: {max_dist:.4f} м\n'
+                    f'Точек с расстоянием > {threshold} м: {points_above_threshold} '
+                    f'({100.0 * points_above_threshold / len(distances):.2f}%)'
+                )
+                QApplication.restoreOverrideCursor()
+                QMessageBox.information(self, 'Статистика сравнения', stats_text)
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+            
+            # Создаем визуализацию
+            source_points = np.asarray(source_cloud['poly_data'].points)
+            
+            if mode == 'differences':
+                # Показываем только точки с расстоянием > порога
+                mask = distances > threshold
+                if not np.any(mask):
+                    QApplication.restoreOverrideCursor()
+                    QMessageBox.information(
+                        self,
+                        'Результат',
+                        f'Нет точек с расстоянием больше {threshold} м.\n'
+                        f'Облака практически идентичны.'
+                    )
+                    return
+                
+                diff_points = source_points[mask]
+                diff_distances = distances[mask]
+                
+                # Создаем облако различий
+                diff_poly = pv.PolyData(diff_points)
+                diff_poly['distance'] = diff_distances
+                diff_poly['height'] = diff_points[:, 2]  # Добавляем height для возможности переключения режимов
+                
+                comparison_name = f"{source_name}_vs_{target_name}_diff"
+            else:
+                # Режим heatmap - показываем все точки с расстояниями
+                diff_poly = pv.PolyData(source_points)
+                diff_poly['distance'] = distances
+                diff_poly['height'] = source_points[:, 2]  # Добавляем height для возможности переключения режимов
+                
+                comparison_name = f"{source_name}_vs_{target_name}_heatmap"
+            
+            # Проверяем уникальность имени
+            counter = 1
+            base_name = comparison_name
+            while comparison_name in self.point_clouds:
+                comparison_name = f"{base_name}_{counter}"
+                counter += 1
+            
+            # Создаем Open3D объект
+            comparison_pcd = o3d.geometry.PointCloud()
+            comparison_pcd.points = o3d.utility.Vector3dVector(np.asarray(diff_poly.points))
+            
+            # Настройка визуализации в зависимости от типа colorbar
+            if colorbar_type == 'binary':
+                # Бинарная раскраска: синий (≤ порог) / красный (> порог)
+                import matplotlib.colors as mcolors
+                
+                # Создаем дискретный colormap с двумя цветами
+                colors_list = ['blue', 'red']
+                n_bins = 2
+                cmap_binary = mcolors.ListedColormap(colors_list)
+                
+                # Создаем границы: все что ≤ threshold -> 0 (синий), > threshold -> 1 (красный)
+                binary_values = (diff_poly['distance'] > threshold).astype(int)
+                diff_poly['binary'] = binary_values
+                
+                actor = self.plotter.add_mesh(
+                    diff_poly,
+                    scalars='binary',
+                    cmap=cmap_binary,
+                    clim=[0, 1],  # Фиксированный диапазон 0-1
+                    point_size=5,
+                    show_scalar_bar=False  # Отключаем, создадим отдельно
+                )
+                
+                # Создаем scalar bar отдельно для управления видимостью
+                scalar_bar_actor = self.plotter.add_scalar_bar(
+                    title=f'Distance\n≤{threshold}m / >{threshold}m',
+                    vertical=True,
+                    height=0.4,
+                    width=0.05,
+                    position_x=0.9,
+                    position_y=0.3,
+                    n_labels=2,
+                    mapper=actor.GetMapper()
+                )
+            else:
+                # Градиентная раскраска (по умолчанию)
+                actor = self.plotter.add_mesh(
+                    diff_poly,
+                    scalars='distance',
+                    cmap='jet',  # Синий -> зеленый -> желтый -> красный
+                    point_size=5,
+                    show_scalar_bar=False  # Отключаем, создадим отдельно
+                )
+                
+                # Создаем scalar bar отдельно для управления видимостью
+                scalar_bar_actor = self.plotter.add_scalar_bar(
+                    title='Distance (m)',
+                    vertical=True,
+                    height=0.6,
+                    width=0.05,
+                    position_x=0.9,
+                    position_y=0.2,
+                    mapper=actor.GetMapper()
+                )
+            
+            # Сохраняем данные
+            self.point_clouds[comparison_name] = {
+                'pcd': comparison_pcd,
+                'poly_data': diff_poly,
+                'actor': actor,
+                'scalar_bar_actor': scalar_bar_actor,  # Сохраняем scalar bar для управления видимостью
+                'visible': True,
+                'file_path': '',
+                'color_mode': 'distance',
+                'selected_indices': set(),
+                'selection_actor': None,
+                'comparison_info': {
+                    'source': source_name,
+                    'target': target_name,
+                    'mode': mode,
+                    'threshold': threshold,
+                    'colorbar_type': colorbar_type,
+                    'mean_dist': mean_dist,
+                    'max_dist': max_dist
+                }
+            }
+            
+            # Добавляем в дерево
+            self.add_cloud_to_tree(comparison_name)
+            
+            # Скрываем исходные облака для лучшего просмотра
+            self.set_cloud_visibility(source_name, False)
+            self.set_cloud_visibility(target_name, False)
+            
+            # Обновляем чекбоксы в дереве
+            root = self.ui.treeWidget.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                cloud_name = item.data(0, Qt.UserRole)
+                if cloud_name == source_name or cloud_name == target_name:
+                    self.ui.treeWidget.blockSignals(True)
+                    item.setCheckState(0, Qt.Unchecked)
+                    self.ui.treeWidget.blockSignals(False)
+            
+            self.plotter.reset_camera()
+            
+            QApplication.restoreOverrideCursor()
+            
+            result_text = f'Создано облако сравнения: {comparison_name}\n\n'
+            if mode == 'differences':
+                result_text += f'Показано {len(diff_points)} точек с различиями > {threshold} м'
+            else:
+                result_text += (
+                    f'Среднее расстояние: {mean_dist:.4f} м\n'
+                    f'Максимальное расстояние: {max_dist:.4f} м'
+                )
+            
+            QMessageBox.information(self, 'Сравнение завершено', result_text)
+            
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось сравнить облака: {str(e)}')
 
     def on_click_crop_tile(self):
         """Открыть диалог параметров тайлинга и разделить облако на тайлы."""
@@ -1338,8 +1672,7 @@ class PCDViewer(QMainWindow):
         if cloud_name not in self.point_clouds:
             return
         mode = self.mode_by_index.get(index, 'height')
-        # Сохраняем выбранный режим на уровне облака
-        self.point_clouds[cloud_name]['color_mode'] = mode
+        # Применяем режим (color_mode обновится внутри функции)
         self.apply_point_color_mode(cloud_name, mode)
 
     def apply_point_color_mode(self, cloud_name, mode):
@@ -1355,14 +1688,26 @@ class PCDViewer(QMainWindow):
             self.plotter.remove_actor(old_actor)
         except Exception:
             pass
+        
+        # Управляем scalar bar при смене режима
+        old_mode = cloud_data.get('color_mode', 'height')
+        has_scalar_bar = cloud_data.get('scalar_bar_actor') is not None
+        
+        # Скрываем старый scalar bar если был
+        if has_scalar_bar and old_mode == 'distance':
+            try:
+                cloud_data['scalar_bar_actor'].SetVisibility(False)
+            except Exception:
+                pass
 
         # Выбор параметров отображения
         kwargs = { 'point_size': point_size, 'show_scalar_bar': False }
 
-        if mode == 'rgb' and 'colors' in poly_data.array_names:
-            kwargs.update({ 'scalars': 'colors', 'rgb': True })
-        elif mode == 'rgb':
-            kwargs.update({ 'color': 'white' })
+        if mode == 'rgb':
+            if 'colors' in poly_data.array_names:
+                kwargs.update({ 'scalars': 'colors', 'rgb': True })
+            else:
+                kwargs.update({ 'color': 'white' })
         elif mode == 'intensity':
             # Ищем массив интенсивностей
             intensity_name = None
@@ -1375,10 +1720,11 @@ class PCDViewer(QMainWindow):
                 kwargs.update({ 'scalars': intensity_name, 'cmap': 'viridis' })
             else:
                 kwargs.update({ 'color': 'white' })
-        if mode == 'label' and 'label' in poly_data.array_names:
-            kwargs.update({ 'scalars': 'label', 'cmap': 'tab20' })
         elif mode == 'label':
-            kwargs.update({ 'color': 'white' })
+            if 'label' in poly_data.array_names:
+                kwargs.update({ 'scalars': 'label', 'cmap': 'tab20' })
+            else:
+                kwargs.update({ 'color': 'white' })
         elif mode == 'predict' and 'predict' in poly_data.array_names:
             # Переопределим цвета для predict на фиксированные цвета классов
             try:
@@ -1397,7 +1743,36 @@ class PCDViewer(QMainWindow):
             kwargs.update({ 'color': 'white' })
         elif mode == 'height':
             # Градиент по высоте: снизу синий, сверху красный
-            kwargs.update({ 'scalars': 'height', 'cmap': 'coolwarm' })
+            if 'height' in poly_data.array_names:
+                kwargs.update({ 'scalars': 'height', 'cmap': 'coolwarm' })
+            else:
+                # Если нет height, вычисляем из координат Z
+                points = np.asarray(poly_data.points)
+                poly_data['height'] = points[:, 2]
+                kwargs.update({ 'scalars': 'height', 'cmap': 'coolwarm' })
+        elif mode == 'distance':
+            # Режим сравнения облаков
+            if has_scalar_bar:
+                # Восстанавливаем визуализацию distance
+                comparison_info = cloud_data.get('comparison_info', {})
+                colorbar_type = comparison_info.get('colorbar_type', 'gradient')
+                
+                if colorbar_type == 'binary' and 'binary' in poly_data.array_names:
+                    # Бинарный режим
+                    import matplotlib.colors as mcolors
+                    colors_list = ['blue', 'red']
+                    cmap_binary = mcolors.ListedColormap(colors_list)
+                    kwargs.update({ 'scalars': 'binary', 'cmap': cmap_binary, 'clim': [0, 1] })
+                elif 'distance' in poly_data.array_names:
+                    # Градиентный режим
+                    kwargs.update({ 'scalars': 'distance', 'cmap': 'jet' })
+                else:
+                    kwargs.update({ 'color': 'white' })
+            elif 'distance' in poly_data.array_names:
+                # Нет scalar bar, но есть данные distance
+                kwargs.update({ 'scalars': 'distance', 'cmap': 'jet' })
+            else:
+                kwargs.update({ 'color': 'white' })
         elif mode in ('white', 'black', 'blue', 'gray'):
             kwargs.update({ 'color': mode })
         else:
@@ -1412,6 +1787,17 @@ class PCDViewer(QMainWindow):
             except Exception:
                 pass
         cloud_data['actor'] = new_actor
+        
+        # Показываем scalar bar если переключились на distance и облако видимо
+        if mode == 'distance' and has_scalar_bar and was_visible:
+            try:
+                cloud_data['scalar_bar_actor'].SetVisibility(True)
+            except Exception:
+                pass
+        
+        # Обновляем режим окраски в данных облака
+        cloud_data['color_mode'] = mode
+        
         self.plotter.render()
     
     def set_cloud_visibility(self, cloud_name, visible):
@@ -1431,6 +1817,12 @@ class PCDViewer(QMainWindow):
                             cloud_data['selection_actor'].SetVisibility(True)
                         except Exception:
                             pass
+                    # Показать scalar bar, если это облако сравнения с режимом distance
+                    if cloud_data.get('scalar_bar_actor') is not None and cloud_data.get('color_mode') == 'distance':
+                        try:
+                            cloud_data['scalar_bar_actor'].SetVisibility(True)
+                        except Exception:
+                            pass
             else:
                 if cloud_data['visible']:
                     # Скрыть облако
@@ -1440,6 +1832,12 @@ class PCDViewer(QMainWindow):
                     if cloud_data.get('selection_actor') is not None:
                         try:
                             cloud_data['selection_actor'].SetVisibility(False)
+                        except Exception:
+                            pass
+                    # Скрыть scalar bar, если есть
+                    if cloud_data.get('scalar_bar_actor') is not None:
+                        try:
+                            cloud_data['scalar_bar_actor'].SetVisibility(False)
                         except Exception:
                             pass
                     
@@ -1734,6 +2132,20 @@ class PCDViewer(QMainWindow):
             
             # Удаляем актор из плоттера
             self.plotter.remove_actor(actor)
+            
+            # Удаляем актор выделения если есть
+            if cloud_data.get('selection_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud_data['selection_actor'])
+                except Exception:
+                    pass
+            
+            # Удаляем scalar bar если есть (для облаков сравнения)
+            if cloud_data.get('scalar_bar_actor') is not None:
+                try:
+                    self.plotter.remove_actor(cloud_data['scalar_bar_actor'])
+                except Exception:
+                    pass
             
             # Удаляем из словаря
             del self.point_clouds[cloud_name]
