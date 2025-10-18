@@ -33,6 +33,7 @@ class PCDViewer(QMainWindow):
         self.ui.pushButton_interpolate.clicked.connect(self.on_click_interpolate)
         self.ui.pushButton_reset_point.clicked.connect(self.on_click_reset_point)
         self.ui.pushButton_remove_point.clicked.connect(self.on_click_remove_point)
+        self.ui.pushButton_crop_tile.clicked.connect(self.on_click_crop_tile)
         self.ui.treeWidget.itemChanged.connect(self.on_tree_item_changed)
         self.ui.treeWidget.currentItemChanged.connect(self.on_tree_current_item_changed)
         
@@ -130,6 +131,8 @@ class PCDViewer(QMainWindow):
         
         # Хранение данных об облаках
         self.point_clouds = {}
+        # Счетчик для уникальных групп тайлов
+        self._tile_group_counter = 0
         # Поля для ML-инференса
         self._ml_pipeline = None
         self._ml_pipelines = {}
@@ -538,6 +541,242 @@ class PCDViewer(QMainWindow):
         cloud_name = current.data(0, Qt.UserRole)
         if cloud_name in self.point_clouds:
             self.delete_selected_points(cloud_name)
+
+    def on_click_crop_tile(self):
+        """Открыть диалог параметров тайлинга и разделить облако на тайлы."""
+        current = self.ui.treeWidget.currentItem()
+        if current is None:
+            QMessageBox.information(self, 'Инфо', 'Не выбрано облако точек')
+            return
+        
+        # Получаем имя облака (может быть группа или отдельное облако)
+        cloud_name = current.data(0, Qt.UserRole)
+        if not cloud_name or cloud_name not in self.point_clouds:
+            QMessageBox.information(self, 'Инфо', 'Некорректный выбор облака')
+            return
+        
+        cloud = self.point_clouds[cloud_name]
+        poly = cloud.get('poly_data')
+        if poly is None or len(poly.points) == 0:
+            QMessageBox.information(self, 'Инфо', 'Облако пустое')
+            return
+        
+        # Диалог параметров тайлинга
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Параметры разделения на тайлы')
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Размер тайла
+        tile_size_layout = QHBoxLayout()
+        tile_size_label = QLabel('Размер тайла (метры):')
+        tile_size_spinbox = QDoubleSpinBox()
+        tile_size_spinbox.setRange(1.0, 1000.0)
+        tile_size_spinbox.setSingleStep(1.0)
+        tile_size_spinbox.setValue(50.0)
+        tile_size_spinbox.setDecimals(1)
+        tile_size_layout.addWidget(tile_size_label)
+        tile_size_layout.addWidget(tile_size_spinbox)
+        dialog_layout.addLayout(tile_size_layout)
+        
+        # Процент перекрытия
+        overlap_layout = QHBoxLayout()
+        overlap_label = QLabel('Перекрытие (%):')
+        overlap_spinbox = QDoubleSpinBox()
+        overlap_spinbox.setRange(0.0, 50.0)
+        overlap_spinbox.setSingleStep(5.0)
+        overlap_spinbox.setValue(10.0)
+        overlap_spinbox.setDecimals(1)
+        overlap_layout.addWidget(overlap_label)
+        overlap_layout.addWidget(overlap_spinbox)
+        dialog_layout.addLayout(overlap_layout)
+        
+        # Информация об облаке
+        points = np.asarray(poly.points)
+        bbox_min = points.min(axis=0)
+        bbox_max = points.max(axis=0)
+        bbox_size = bbox_max - bbox_min
+        
+        info_label = QLabel(
+            f'Размер облака:\n'
+            f'X: {bbox_size[0]:.2f} м\n'
+            f'Y: {bbox_size[1]:.2f} м\n'
+            f'Z: {bbox_size[2]:.2f} м\n'
+            f'Точек: {len(points)}'
+        )
+        dialog_layout.addWidget(info_label)
+        
+        # Кнопки OK/Cancel
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton('Создать тайлы')
+        cancel_button = QPushButton('Отмена')
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        tile_size = tile_size_spinbox.value()
+        overlap_percent = overlap_spinbox.value()
+        
+        # Выполняем тайлинг
+        self._create_tiles(cloud_name, tile_size, overlap_percent)
+
+    def _create_tiles(self, cloud_name, tile_size, overlap_percent):
+        """Разделить облако на тайлы и создать группу в дереве."""
+        try:
+            cloud = self.point_clouds[cloud_name]
+            poly = cloud['poly_data']
+            points = np.asarray(poly.points)
+            
+            # Уникальный ID для группы тайлов
+            self._tile_group_counter += 1
+            group_id = self._tile_group_counter
+            
+            # Вычисляем границы облака
+            bbox_min = points.min(axis=0)
+            bbox_max = points.max(axis=0)
+            
+            # Вычисляем шаг с учетом перекрытия
+            overlap = tile_size * overlap_percent / 100.0
+            step = tile_size - overlap
+            
+            # Генерируем сетку тайлов
+            x_coords = np.arange(bbox_min[0], bbox_max[0], step)
+            y_coords = np.arange(bbox_min[1], bbox_max[1], step)
+            
+            if len(x_coords) == 0:
+                x_coords = np.array([bbox_min[0]])
+            if len(y_coords) == 0:
+                y_coords = np.array([bbox_min[1]])
+            
+            # Создаем тайлы
+            tiles = []
+            tile_count = 0
+            
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            
+            for i, x in enumerate(x_coords):
+                for j, y in enumerate(y_coords):
+                    # Границы тайла
+                    x_min, x_max = x, x + tile_size
+                    y_min, y_max = y, y + tile_size
+                    
+                    # Фильтруем точки внутри тайла
+                    mask = (
+                        (points[:, 0] >= x_min) & (points[:, 0] < x_max) &
+                        (points[:, 1] >= y_min) & (points[:, 1] < y_max)
+                    )
+                    
+                    if not np.any(mask):
+                        continue
+                    
+                    # Создаем тайл
+                    tile_points = points[mask]
+                    tile_poly_data = pv.PolyData(tile_points)
+                    
+                    # Копируем атрибуты
+                    for attr_name in poly.array_names:
+                        try:
+                            attr_data = np.asarray(poly[attr_name])
+                            if len(attr_data) == len(points):
+                                tile_poly_data[attr_name] = attr_data[mask]
+                        except Exception:
+                            pass
+                    
+                    # Имя тайла с уникальным group_id
+                    tile_name = f"{cloud_name}_tiles{group_id:03d}_i{i:04d}_j{j:04d}"
+                    
+                    # Создаем Open3D объект
+                    tile_pcd = o3d.geometry.PointCloud()
+                    tile_pcd.points = o3d.utility.Vector3dVector(tile_points)
+                    
+                    # Добавляем в плоттер (изначально скрытым)
+                    mode = cloud.get('color_mode', 'height')
+                    kwargs = {'point_size': 3, 'show_scalar_bar': False}
+                    
+                    if mode == 'rgb' and 'colors' in tile_poly_data.array_names:
+                        kwargs.update({'scalars': 'colors', 'rgb': True})
+                    elif mode == 'height':
+                        kwargs.update({'scalars': 'height', 'cmap': 'coolwarm'})
+                    else:
+                        kwargs.update({'color': 'white'})
+                    
+                    actor = self.plotter.add_mesh(tile_poly_data, **kwargs)
+                    actor.SetVisibility(False)  # Скрываем по умолчанию
+                    
+                    # Сохраняем данные тайла
+                    self.point_clouds[tile_name] = {
+                        'pcd': tile_pcd,
+                        'poly_data': tile_poly_data,
+                        'actor': actor,
+                        'visible': False,
+                        'file_path': cloud.get('file_path', ''),
+                        'color_mode': mode,
+                        'selected_indices': set(),
+                        'selection_actor': None,
+                        'parent_group': f"{cloud_name}_tiles{group_id:03d}",
+                        'tile_info': {
+                            'i': i,
+                            'j': j,
+                            'x_min': x_min,
+                            'x_max': x_max,
+                            'y_min': y_min,
+                            'y_max': y_max
+                        }
+                    }
+                    
+                    tiles.append(tile_name)
+                    tile_count += 1
+            
+            QApplication.restoreOverrideCursor()
+            
+            if tile_count == 0:
+                QMessageBox.information(self, 'Инфо', 'Не удалось создать тайлы')
+                return
+            
+            # Создаем группу в дереве
+            group_name = f"{cloud_name}_tiles{group_id:03d}"
+            self._add_tile_group_to_tree(group_name, tiles, cloud_name)
+            
+            QMessageBox.information(
+                self,
+                'Успех',
+                f'Создано {tile_count} тайлов\n'
+                f'Размер: {tile_size}м\n'
+                f'Перекрытие: {overlap_percent}%'
+            )
+            
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось создать тайлы: {str(e)}')
+
+    def _add_tile_group_to_tree(self, group_name, tiles, source_cloud_name):
+        """Добавить группу тайлов в дерево."""
+        # Создаем элемент группы
+        group_item = QTreeWidgetItem(self.ui.treeWidget)
+        group_item.setText(0, f"{source_cloud_name} - tiles ({len(tiles)})")
+        group_item.setFlags(group_item.flags() | Qt.ItemIsUserCheckable)
+        group_item.setCheckState(0, Qt.Unchecked)
+        group_item.setData(0, Qt.UserRole, group_name)
+        group_item.setData(0, Qt.UserRole + 1, 'group')  # Метка группы
+        group_item.setData(0, Qt.UserRole + 2, tiles)  # Список тайлов в группе
+        
+        # Добавляем дочерние элементы (тайлы)
+        for tile_name in tiles:
+            tile_item = QTreeWidgetItem(group_item)
+            # Отображаем только координаты тайла
+            tile_suffix = tile_name.split('_i')[-1] if '_i' in tile_name else tile_name
+            tile_item.setText(0, f"i{tile_suffix}")
+            tile_item.setFlags(tile_item.flags() | Qt.ItemIsUserCheckable)
+            tile_item.setCheckState(0, Qt.Unchecked)
+            tile_item.setData(0, Qt.UserRole, tile_name)
+            tile_item.setData(0, Qt.UserRole + 1, 'tile')  # Метка тайла
+        
+        # Раскрываем группу
+        group_item.setExpanded(True)
     
     def setup_pyvista_widget(self):
         """Настройка PyVista виджета в frame_view"""
@@ -711,10 +950,61 @@ class PCDViewer(QMainWindow):
     def on_tree_item_changed(self, item, column):
         """Обработка изменения состояния чекбокса"""
         if column == 0:
-            cloud_name = item.data(0, Qt.UserRole)
-            if cloud_name and cloud_name in self.point_clouds:
+            item_type = item.data(0, Qt.UserRole + 1)
+            
+            if item_type == 'group':
+                # Это группа тайлов - управляем видимостью всех дочерних тайлов
                 is_checked = item.checkState(0) == Qt.Checked
-                self.set_cloud_visibility(cloud_name, is_checked)
+                # Блокируем сигналы чтобы избежать рекурсии
+                self.ui.treeWidget.blockSignals(True)
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    child.setCheckState(0, Qt.Checked if is_checked else Qt.Unchecked)
+                    tile_name = child.data(0, Qt.UserRole)
+                    if tile_name in self.point_clouds:
+                        self.set_cloud_visibility(tile_name, is_checked)
+                self.ui.treeWidget.blockSignals(False)
+            elif item_type == 'tile':
+                # Это отдельный тайл - обновляем его видимость и состояние группы
+                cloud_name = item.data(0, Qt.UserRole)
+                if cloud_name and cloud_name in self.point_clouds:
+                    is_checked = item.checkState(0) == Qt.Checked
+                    self.set_cloud_visibility(cloud_name, is_checked)
+                    
+                    # Обновляем состояние родительской группы
+                    parent = item.parent()
+                    if parent:
+                        self._update_group_check_state(parent)
+            else:
+                # Это обычное облако
+                cloud_name = item.data(0, Qt.UserRole)
+                if cloud_name and cloud_name in self.point_clouds:
+                    is_checked = item.checkState(0) == Qt.Checked
+                    self.set_cloud_visibility(cloud_name, is_checked)
+
+    def _update_group_check_state(self, group_item):
+        """Обновить состояние чекбокса группы на основе состояния дочерних элементов."""
+        if group_item.childCount() == 0:
+            return
+        
+        checked_count = 0
+        total_count = group_item.childCount()
+        
+        for i in range(total_count):
+            child = group_item.child(i)
+            if child.checkState(0) == Qt.Checked:
+                checked_count += 1
+        
+        # Блокируем сигналы чтобы не вызвать рекурсию
+        self.ui.treeWidget.blockSignals(True)
+        if checked_count == 0:
+            group_item.setCheckState(0, Qt.Unchecked)
+        elif checked_count == total_count:
+            group_item.setCheckState(0, Qt.Checked)
+        else:
+            # Частично выбрано - оставляем unchecked (или можно добавить tristate)
+            group_item.setCheckState(0, Qt.Unchecked)
+        self.ui.treeWidget.blockSignals(False)
 
     def on_tree_current_item_changed(self, current, previous):
         """Обновление информации при смене выбранного элемента"""
@@ -1168,35 +1458,258 @@ class PCDViewer(QMainWindow):
         item = self.ui.treeWidget.itemAt(position)
         if item is None:
             return
-            
-        cloud_name = item.data(0, Qt.UserRole)
-        if not cloud_name or cloud_name not in self.point_clouds:
-            return
-            
+        
+        item_type = item.data(0, Qt.UserRole + 1)
+        
         # Создаем контекстное меню
         context_menu = QMenu(self)
         
-        # Очистка выделения точек
-        clear_sel_action = context_menu.addAction("Очистить выделение")
-        clear_sel_action.triggered.connect(lambda: self.clear_selection(cloud_name))
-        
-        # Удаление выделенных точек
-        del_sel_action = context_menu.addAction("Удалить выделенные точки")
-        del_sel_action.triggered.connect(lambda: self.delete_selected_points(cloud_name))
-        
-        # Интерполяция области
-        fill_hole_action = context_menu.addAction("Интерполировать область (beta)")
-        fill_hole_action.triggered.connect(lambda: self.fill_hole(cloud_name))
-        
-        context_menu.addSeparator()
-        
-        # Добавляем действие удаления
-        delete_action = context_menu.addAction("Удалить")
-        delete_action.triggered.connect(lambda: self.delete_cloud(cloud_name))
+        if item_type == 'group':
+            # Это группа тайлов
+            group_name = item.data(0, Qt.UserRole)
+            tiles = item.data(0, Qt.UserRole + 2)
+            
+            # Объединение тайлов в облако
+            merge_action = context_menu.addAction("Объединить тайлы в облако")
+            merge_action.triggered.connect(lambda: self.merge_tiles_to_cloud(group_name, tiles))
+            
+            context_menu.addSeparator()
+            
+            # Удаление группы тайлов
+            delete_group_action = context_menu.addAction("Удалить группу тайлов")
+            delete_group_action.triggered.connect(lambda: self.delete_tile_group(group_name, tiles, item))
+        else:
+            # Это обычное облако или тайл
+            cloud_name = item.data(0, Qt.UserRole)
+            if not cloud_name or cloud_name not in self.point_clouds:
+                return
+            
+            # Очистка выделения точек
+            clear_sel_action = context_menu.addAction("Очистить выделение")
+            clear_sel_action.triggered.connect(lambda: self.clear_selection(cloud_name))
+            
+            # Удаление выделенных точек
+            del_sel_action = context_menu.addAction("Удалить выделенные точки")
+            del_sel_action.triggered.connect(lambda: self.delete_selected_points(cloud_name))
+            
+            # Интерполяция области
+            fill_hole_action = context_menu.addAction("Интерполировать область (beta)")
+            fill_hole_action.triggered.connect(lambda: self.fill_hole(cloud_name))
+            
+            context_menu.addSeparator()
+            
+            # Добавляем действие удаления
+            delete_action = context_menu.addAction("Удалить")
+            delete_action.triggered.connect(lambda: self.delete_cloud(cloud_name))
         
         # Показываем меню в глобальных координатах
         context_menu.exec_(self.ui.treeWidget.mapToGlobal(position))
     
+    def merge_tiles_to_cloud(self, group_name, tiles):
+        """Объединить тайлы группы в единое облако точек"""
+        if not tiles:
+            QMessageBox.information(self, 'Инфо', 'Нет тайлов для объединения')
+            return
+        
+        try:
+            # Собираем все точки и атрибуты из тайлов
+            all_points = []
+            all_attributes = {}
+            color_mode = 'height'
+            
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            
+            for tile_name in tiles:
+                if tile_name not in self.point_clouds:
+                    continue
+                
+                tile_data = self.point_clouds[tile_name]
+                poly = tile_data['poly_data']
+                
+                # Собираем точки
+                points = np.asarray(poly.points)
+                all_points.append(points)
+                
+                # Собираем атрибуты
+                for attr_name in poly.array_names:
+                    try:
+                        attr_data = np.asarray(poly[attr_name])
+                        if attr_name not in all_attributes:
+                            all_attributes[attr_name] = []
+                        all_attributes[attr_name].append(attr_data)
+                    except Exception:
+                        pass
+                
+                # Запоминаем режим окраски
+                if 'color_mode' in tile_data:
+                    color_mode = tile_data['color_mode']
+            
+            if not all_points:
+                QApplication.restoreOverrideCursor()
+                QMessageBox.warning(self, 'Предупреждение', 'Не удалось собрать точки из тайлов')
+                return
+            
+            # Объединяем все точки
+            merged_points = np.vstack(all_points)
+            
+            # Объединяем атрибуты
+            merged_attributes = {}
+            for attr_name, attr_list in all_attributes.items():
+                try:
+                    merged_attributes[attr_name] = np.concatenate(attr_list)
+                except Exception:
+                    pass
+            
+            # Создаем имя для объединенного облака
+            base_name = group_name.replace('_tiles', '_merged')
+            merged_name = base_name
+            counter = 1
+            while merged_name in self.point_clouds:
+                merged_name = f"{base_name}_{counter}"
+                counter += 1
+            
+            # Создаем PyVista PolyData
+            merged_poly = pv.PolyData(merged_points)
+            for attr_name, attr_data in merged_attributes.items():
+                if len(attr_data) == len(merged_points):
+                    merged_poly[attr_name] = attr_data
+            
+            # Создаем Open3D объект
+            merged_pcd = o3d.geometry.PointCloud()
+            merged_pcd.points = o3d.utility.Vector3dVector(merged_points)
+            
+            # Добавляем в плоттер
+            kwargs = {'point_size': 3, 'show_scalar_bar': False}
+            
+            if color_mode == 'rgb' and 'colors' in merged_poly.array_names:
+                kwargs.update({'scalars': 'colors', 'rgb': True})
+            elif color_mode == 'height':
+                kwargs.update({'scalars': 'height', 'cmap': 'coolwarm'})
+            elif color_mode == 'predict' and 'predict' in merged_poly.array_names:
+                # Используем фиксированные цвета классов
+                try:
+                    import matplotlib.colors as mcolors
+                    # Пытаемся получить конфигурацию из первого тайла
+                    first_tile = self.point_clouds.get(tiles[0])
+                    cfg_name = first_tile.get('predict_cfg', 'randlanet') if first_tile else 'randlanet'
+                    names, colors = self._get_class_names_and_colors(cfg_name)
+                    colors01 = [(r/255.0, g/255.0, b/255.0) for (r, g, b) in colors]
+                    cmap = mcolors.ListedColormap(colors01, name='fixed_pred')
+                    kwargs.update({'scalars': 'predict', 'cmap': cmap})
+                except Exception:
+                    kwargs.update({'scalars': 'predict', 'cmap': 'tab20'})
+            else:
+                kwargs.update({'color': 'white'})
+            
+            actor = self.plotter.add_mesh(merged_poly, **kwargs)
+            
+            # Сохраняем данные объединенного облака
+            self.point_clouds[merged_name] = {
+                'pcd': merged_pcd,
+                'poly_data': merged_poly,
+                'actor': actor,
+                'visible': True,
+                'file_path': '',
+                'color_mode': color_mode,
+                'selected_indices': set(),
+                'selection_actor': None
+            }
+            
+            # Копируем конфигурацию предсказаний если есть
+            first_tile = self.point_clouds.get(tiles[0])
+            if first_tile and 'predict_cfg' in first_tile:
+                self.point_clouds[merged_name]['predict_cfg'] = first_tile['predict_cfg']
+            
+            # Добавляем в дерево
+            self.add_cloud_to_tree(merged_name)
+            
+            # Подгоняем камеру
+            self.plotter.reset_camera()
+            
+            QApplication.restoreOverrideCursor()
+            
+            # Спрашиваем, удалить ли исходные тайлы
+            reply = QMessageBox.question(
+                self,
+                'Объединение завершено',
+                f'Облако "{merged_name}" создано ({len(merged_points)} точек).\n\n'
+                f'Удалить исходную группу тайлов?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Находим элемент группы в дереве и удаляем
+                root = self.ui.treeWidget.invisibleRootItem()
+                for i in range(root.childCount()):
+                    item = root.child(i)
+                    if item.data(0, Qt.UserRole) == group_name:
+                        self.delete_tile_group(group_name, tiles, item)
+                        break
+            
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, 'Ошибка', f'Не удалось объединить тайлы: {str(e)}')
+
+    def delete_tile_group(self, group_name, tiles, group_item):
+        """Удаление группы тайлов"""
+        if not tiles:
+            return
+        
+        # Подтверждение удаления только если вызвано напрямую (не из merge)
+        import inspect
+        caller_name = inspect.stack()[1].function
+        if caller_name != 'merge_tiles_to_cloud':
+            reply = QMessageBox.question(
+                self,
+                'Подтверждение удаления',
+                f'Вы уверены, что хотите удалить группу с {len(tiles)} тайлами?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+        
+        try:
+            # Удаляем все тайлы из группы
+            for tile_name in tiles:
+                if tile_name in self.point_clouds:
+                    cloud_data = self.point_clouds[tile_name]
+                    
+                    # Удаляем актор из плоттера
+                    try:
+                        self.plotter.remove_actor(cloud_data['actor'])
+                    except Exception:
+                        pass
+                    
+                    # Удаляем актор выделения если есть
+                    if cloud_data.get('selection_actor') is not None:
+                        try:
+                            self.plotter.remove_actor(cloud_data['selection_actor'])
+                        except Exception:
+                            pass
+                    
+                    # Удаляем из словаря
+                    del self.point_clouds[tile_name]
+            
+            # Удаляем группу из дерева
+            root = self.ui.treeWidget.invisibleRootItem()
+            root.removeChild(group_item)
+            
+            # Обновляем рендер
+            self.plotter.render()
+            
+            # Обновляем счетчик
+            current = self.ui.treeWidget.currentItem()
+            if current is not None:
+                self.on_tree_current_item_changed(current, None)
+            else:
+                self.ui.label_count_value.setText("0")
+                
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка удаления', f'Не удалось удалить группу тайлов:\n{str(e)}')
+
     def delete_cloud(self, cloud_name):
         """Удаление облака точек"""
         if cloud_name not in self.point_clouds:

@@ -978,7 +978,7 @@ QPushButton:pressed{
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QPushButton" name="pushButton_crop_tale">
+         <widget class="QPushButton" name="pushButton_crop_tile">
           <property name="text">
            <string/>
           </property>
