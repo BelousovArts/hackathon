@@ -154,12 +154,14 @@ class PCDViewer(QMainWindow):
             'randlanet': os.path.join(self._base_dir, "configs", "randlanet_hack2c.yml"),
             'randlanet_toronto3d': os.path.join(self._base_dir, "configs", "randlanet_toronto3d.yml"),
             'randlanet_semantickitti': os.path.join(self._base_dir, "configs", "randlanet_semantickitti.yml"),
+            'randlanet_lidar_scenes': os.path.join(self._base_dir, "configs", "randlanet_lidar_scenes.yml"),
         }
         # Карта чекпоинтов по конфигам
         self._ml_ckpt_map = {
             'randlanet': os.path.join(self._base_dir, "models", "randlanet_hack2c.pth"),
             'randlanet_toronto3d': os.path.join(self._base_dir, "models", "randlanet_toronto3d.pth"),
             'randlanet_semantickitti': os.path.join(self._base_dir, "models", "randlanet_semantickitti.pth"),
+            'randlanet_lidar_scenes': os.path.join(self._base_dir, "models", "randlanet_lidar_scenes.pth"),
         }
         
         # Инициализация статусбара
@@ -243,6 +245,8 @@ class PCDViewer(QMainWindow):
                 return 'randlanet_toronto3d'
             if 'kitti' in name or 'semantik' in name or 'semantic' in name:
                 return 'randlanet_semantickitti'
+            if 'lidar' in name or 'scenes' in name:
+                return 'randlanet_lidar_scenes'
             if name.startswith('randla-net') or name.startswith('randlanet'):
                 return 'randlanet'
             return 'randlanet'
@@ -285,19 +289,40 @@ class PCDViewer(QMainWindow):
         self._ml_pipeline = pipeline
         self._ml_pipelines[cfg_name] = pipeline
 
-    def _run_inference_on_points(self, points_xyz):
-        """Выполнить инференс на numpy массиве Nx3, вернуть массив меток int32."""
+    def _run_inference_on_points(self, points_xyz, intensity=None):
+        """Выполнить инференс на numpy массиве Nx3, вернуть массив меток int32.
+        
+        Args:
+            points_xyz: Координаты точек Nx3
+            intensity: Интенсивность точек Nx1 (опционально)
+        """
         import numpy as np
         import open3d as o3d
         points = np.asarray(points_xyz, dtype=np.float32)
         labels_dummy = np.zeros(points.shape[0], dtype=np.int32)
-        # Добавим нулевые RGB фичи, если модель ожидает >3 входных каналов (например Toronto3D: 6)
+        
+        # Определяем количество дополнительных признаков
         try:
             in_ch = int(getattr(self._ml_pipeline.model.cfg, 'in_channels', 3))
         except Exception:
             in_ch = 3
         extra_feat = max(0, in_ch - 3)
-        feat = np.zeros((points.shape[0], extra_feat), dtype=np.float32) if extra_feat > 0 else None
+        
+        # Создаём матрицу признаков
+        if extra_feat == 0:
+            feat = None
+        elif extra_feat == 1:
+            # Один дополнительный канал - используем intensity если есть
+            if intensity is not None and intensity.shape[0] == points.shape[0]:
+                feat = np.asarray(intensity, dtype=np.float32).reshape(-1, 1)
+            else:
+                feat = np.zeros((points.shape[0], 1), dtype=np.float32)
+        else:
+            # Несколько каналов - intensity в первый, остальные нули
+            feat = np.zeros((points.shape[0], extra_feat), dtype=np.float32)
+            if intensity is not None and intensity.shape[0] == points.shape[0]:
+                feat[:, 0:1] = np.asarray(intensity, dtype=np.float32).reshape(-1, 1)
+        
         data = { 'point': points, 'feat': feat, 'label': labels_dummy }
         results = self._ml_pipeline.run_inference(data)
         pred = results.get('predict_labels')
@@ -352,6 +377,17 @@ class PCDViewer(QMainWindow):
                 (80, 240, 150),   # Terrain
                 (150, 240, 255),  # Pole
                 (0, 0, 255),      # Traffic-sign
+            ]
+        elif cfg_name == 'randlanet_lidar_scenes':
+            # Lidar Scenes: 4 класса
+            names = [
+                'Background', 'Car', 'Person', 'Tram'
+            ]
+            colors = [
+                (128, 128, 128),  # Background (серый)
+                (255, 0, 0),      # Car (красный)
+                (0, 0, 255),      # Person (синий)
+                (255, 255, 0),    # Tram (желтый)
             ]
         else:
             # Hack2C / RandLA-Net (2 класса)
@@ -447,7 +483,8 @@ class PCDViewer(QMainWindow):
         networks = [
             ('RandLA-Net (Hack2C)', 'randlanet'),
             ('RandLA-Net (Toronto3D)', 'randlanet_toronto3d'),
-            ('RandLA-Net (SemanticKITTI)', 'randlanet_semantickitti')
+            ('RandLA-Net (SemanticKITTI)', 'randlanet_semantickitti'),
+            ('RandLA-Net (Lidar Scenes)', 'randlanet_lidar_scenes')
         ]
         for name, cfg in networks:
             item = QListWidgetItem(name)
@@ -494,12 +531,18 @@ class PCDViewer(QMainWindow):
             if pts.size == 0:
                 QMessageBox.warning(self, 'Предупреждение', 'Облако пустое')
                 return
-            # 3) Запускаем инференс
-            pred = self._run_inference_on_points(pts[:, :3])
+            
+            # 3) Извлекаем intensity если есть
+            intensity = None
+            if 'intensity' in poly.array_names:
+                intensity = np.asarray(poly['intensity']).reshape(-1, 1)
+            
+            # 4) Запускаем инференс с intensity
+            pred = self._run_inference_on_points(pts[:, :3], intensity)
             if pred.shape[0] != pts.shape[0]:
                 QMessageBox.warning(self, 'Предупреждение', 'Размер предсказаний не совпадает с числом точек')
                 return
-            # 4) Кладём предсказания в poly_data и применяем режим
+            # 5) Кладём предсказания в poly_data и применяем режим
             cloud['poly_data']['predict'] = pred
             cloud['predict_cfg'] = cfg_name
             cloud['color_mode'] = 'predict'

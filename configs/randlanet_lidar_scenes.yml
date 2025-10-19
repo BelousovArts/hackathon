@@ -1,0 +1,47 @@
+dataset:
+  name: LidarDS4CMerged
+  dataset_path: /home/ml/dev/hakatop-cuda/Open3D-ML/data/Lidar/Lidar_DS_1-50
+  cache_dir: ./logs/cache
+  ignored_label_inds: []
+  num_points: 32768
+  use_cache: false
+  auto_split: true
+  train_split: 0.8
+  val_split: 0.15
+  test_split: 0.05
+  train_on_all: false
+
+model:
+  name: RandLANet
+  batcher: DefaultBatcher
+  num_neighbors: 16
+  num_layers: 4
+  num_points: 32768
+  num_classes: 4
+  ignored_label_inds: []
+  sub_sampling_ratio: [4, 4, 4, 4]
+  in_channels: 4   # XYZ (3) + intensity (1)
+  dim_features: 8
+  dim_output: [16, 64, 128, 256]
+  grid_size: 0.06
+  augment:
+    recenter:
+      dim: [0, 1, 2]
+    normalize:
+      points:
+        method: linear
+
+pipeline:
+  name: SemanticSegmentation
+  optimizer:
+    lr: 0.01
+  batch_size: 2
+  val_batch_size: 2
+  test_batch_size: 1
+  main_log_dir: ./logs
+  max_epoch: 200
+  save_ckpt_freq: 1
+  scheduler_gamma: 0.9886
+  device: gpu
+  train_sum_dir: train_log
+
